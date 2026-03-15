@@ -89,7 +89,9 @@ Without these the app uses a spectral heuristic fallback — still works, but ge
 ```bash
 npm install essentia.js
 cp node_modules/essentia.js/dist/essentia-wasm.es.js public/models/
-cp node_modules/essentia.js/dist/essentia-wasm.module.wasm public/models/
+# Some essentia.js versions publish a different WASM filename in dist/
+WASM_SRC=$(find node_modules/essentia.js/dist -maxdepth 1 -type f -name 'essentia-wasm*.wasm' | head -n 1)
+cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
 ```
 
 **Optional: MAEST model for highest accuracy (~200 MB)**
@@ -108,6 +110,8 @@ Or if you prefer to download it manually:
 3. Move the downloaded file to `public/models/maest-30s-pw.onnx`
 
 See [`public/models/README.md`](public/models/README.md) for more details.
+
+If `WASM_SRC` is empty, run `ls node_modules/essentia.js/dist` and copy the `.wasm` file you see there to `public/models/essentia-wasm.module.wasm`.
 
 ### 4. Enable OSC in GrandMA3
 
@@ -317,7 +321,9 @@ If you also see `Failed to resolve import "/models/essentia-wasm.es.js"`, instal
 mkdir -p public/models
 npm install essentia.js
 cp node_modules/essentia.js/dist/essentia-wasm.es.js public/models/
-cp node_modules/essentia.js/dist/essentia-wasm.module.wasm public/models/
+# Some essentia.js versions publish a different WASM filename in dist/
+WASM_SRC=$(find node_modules/essentia.js/dist -maxdepth 1 -type f -name 'essentia-wasm*.wasm' | head -n 1)
+cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
 ```
 
 Without Essentia files, the app will still run with the spectral fallback detector, but accuracy is lower.
