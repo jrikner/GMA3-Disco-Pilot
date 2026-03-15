@@ -185,9 +185,11 @@ function selectGenre(scores) {
 
 async function loadEssentia() {
   try {
-    // Dynamic import — Essentia WASM loads from /public/models/
-    // Using essentia.js from CDN or bundled in public/
-    const EssentiaModule = await import('/models/essentia-wasm.es.js').catch(() => null)
+    // Dynamic import from /public/models/
+    // IMPORTANT: use a variable + @vite-ignore so missing optional model files
+    // do not crash Vite import analysis during startup.
+    const essentiaUrl = '/models/essentia-wasm.es.js'
+    const EssentiaModule = await import(/* @vite-ignore */ essentiaUrl).catch(() => null)
     if (!EssentiaModule) {
       console.warn('[GenreDetector] Essentia.js not found in /public/models/ — using spectral heuristic fallback')
       return
