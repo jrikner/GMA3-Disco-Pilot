@@ -22,7 +22,7 @@ const useStore = create((set, get) => ({
   // ── Session config (set during wizard) ─────────────────────────────────────
   session: {
     name: '',
-    fixtureGroups: [],      // [{ name, fixtureType, attributes: {pt, rgb, colorWheel, strobe, dimmer, zoom} }]
+    fixtureGroups: [],      // [{ fixtureType, attributes: {pt, rgb, colorWheel, strobe, dimmer, zoom} }]
     avoidColors: [],        // [{ h, s, l, label }]
     emphasizeColors: [],    // [{ h, s, l, label }]
     tonightContexts: [],    // ['edm', 'hiphop', ...]
@@ -30,6 +30,15 @@ const useStore = create((set, get) => ({
     freeExecutorStart: 1,
     addressMap: null,       // built after wizard
     boundaries: {},         // key: `${page}_${exec}` → { min, max }
+    phaserConfig: {
+      includePtFast: true,
+      includePanOnly: true,
+      includeTiltOnly: true,
+      ptPreset: '',
+      panPreset: '',
+      tiltPreset: '',
+      switchIntervalMs: 180000,
+    },
   },
 
   updateSession: (patch) => set((s) => ({

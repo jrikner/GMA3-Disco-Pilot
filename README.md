@@ -223,23 +223,33 @@ Creates 14 executors on the page and start executor you configure:
 
 ```
 Exec +0  to +7   →  Color look sequences (one per genre)
-Exec +8  to +11  →  Phaser sequences (created by Phaser Plugin)
-Exec +12         →  BPM Rate Master
-Exec +13         →  Effect Size Master
+Exec +8  onward   →  Phaser sequences (P/T slow + optional P/T fast, pan-only, tilt-only + color + dim)
+Exec +?          →  BPM Rate Master (immediately after the last phaser)
+Exec +?          →  Effect Size Master (immediately after BPM master)
 ```
 
 After running: right-click the Rate Master executor → set type to **SpeedMaster**. Right-click the Effect Size executor → set type to **SizeMaster**. The app controls these via fader level, not direct speed assignment.
 
 ### Phaser plugin (`GMA3_Disco_Pilot_Phasers.lua`)
 
-Creates P/T slow, P/T fast, color chase, and dimmer pulse sequences using MA3's Effect Engine. Because phaser creation via `gma.cmd()` is not fully documented in MA3 v2.x:
+Creates a deterministic, contiguous phaser block starting from `Exec +8`, using MA3's Effect Engine. The set is:
 
-1. After running, open each `DP_PHASER_*` sequence in MA3
+- Always included (when mover groups exist): `DP_PHASER_PT_SLOW`
+- Optional toggles: `DP_PHASER_PT_FAST`, `DP_PHASER_PAN_ONLY`, `DP_PHASER_TILT_ONLY`
+- Optional movement presets: per-sequence P/T, Pan-only, Tilt-only preset references (entered in wizard)
+- Included when RGB groups exist: `DP_PHASER_COLOR`
+- Always included: `DP_PHASER_DIM`
+
+Because phaser creation via `gma.cmd()` is not fully documented in MA3 v2.x:
+
+1. After running, open each generated `DP_PHASER_*` sequence in MA3
 2. Verify Cue 1 has an effect in the programmer
-3. If not: use the Effect Engine panel to add a Sinus effect to Pan/Tilt (Width 30, Rate 0.3 for slow; Width 45, Rate 1.2 for fast)
+3. If not: use the Effect Engine panel to add/adjust the phaser manually (for example Pan/Tilt Sinus Width 30 Rate 0.3 for slow; Width 45 Rate 1.2 for fast)
 4. Store back to the sequence cue
 
-The generated script includes a step-chase alternative in comments — uncomment it if the Effect Engine approach doesn't work for your fixture types.
+The generated script includes a step-chase alternative in comments for `DP_PHASER_PT_SLOW` — uncomment it if the Effect Engine approach doesn't work for your fixture types.
+
+Movement phasers are assigned as **Temp faders** so the app can randomize movement emphasis (P/T combined vs Pan-only vs Tilt-only, including weighted mixes) every 3 minutes, on genre changes, and on detected drops.
 
 ---
 
