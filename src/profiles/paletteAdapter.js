@@ -14,27 +14,38 @@ const DEFAULT_NEUTRAL = { h: 200, s: 30, l: 60, label: 'Neutral' }
  */
 export function buildCueFriendlyPalette(genreId, options = {}) {
   const {
-    avoidColors = [],
-    emphasizeColors = [],
+    avoidColors: rawAvoidColors = [],
+    emphasizeColors: rawEmphasizeColors = [],
     maxColors = 6,
   } = options
 
+  const cappedMax = Number.isFinite(maxColors) ? Math.max(1, Math.floor(maxColors)) : 6
+  const avoidColors = normalizeColors(rawAvoidColors)
+  const emphasizeColors = normalizeColors(rawEmphasizeColors)
   const basePalette = getBaseGenrePalette(genreId)
 
   const viableBase = basePalette.filter(color => !isAvoided(color, avoidColors))
-  const viableEmphasis = normalizeColors(emphasizeColors).filter(color => !isAvoided(color, avoidColors))
+  const viableEmphasis = emphasizeColors.filter(color => !isAvoided(color, avoidColors))
 
-  const candidates = dedupeByHue([...viableBase, ...viableEmphasis])
+  // Emphasized colors take priority and should survive de-duplication.
+  const candidates = dedupeByHue([...viableEmphasis, ...viableBase])
 
   if (candidates.length === 0) {
     return [DEFAULT_NEUTRAL]
   }
 
   const selected = []
-  const first = pickBestSeed(candidates, viableBase, viableEmphasis)
-  selected.push(first)
 
-  while (selected.length < Math.min(maxColors, candidates.length)) {
+  // Always select emphasized colors first (ordered by harmony + contrast between emphasized picks).
+  for (const emphasized of viableEmphasis) {
+    if (selected.length >= cappedMax) break
+    const match = candidates.find(candidate => candidate === emphasized)
+    if (!match || selected.includes(match)) continue
+
+    selected.push(match)
+  }
+
+  while (selected.length < Math.min(cappedMax, candidates.length)) {
     const remaining = candidates.filter(color => !selected.includes(color))
     const next = pickBestNext(remaining, selected, viableBase, viableEmphasis)
     if (!next) break
@@ -50,24 +61,6 @@ export function getBaseGenrePalette(genreId) {
   return normalizeColors(colors)
 }
 
-function pickBestSeed(candidates, basePalette, emphasizeColors) {
-  let best = candidates[0]
-  let bestScore = Number.NEGATIVE_INFINITY
-
-  for (const candidate of candidates) {
-    const score =
-      scoreHarmonyToBase(candidate, basePalette) * 0.6 +
-      scoreEmphasis(candidate, emphasizeColors) * 0.4
-
-    if (score > bestScore) {
-      best = candidate
-      bestScore = score
-    }
-  }
-
-  return best
-}
-
 function pickBestNext(candidates, selected, basePalette, emphasizeColors) {
   if (candidates.length === 0) return null
 
@@ -77,8 +70,8 @@ function pickBestNext(candidates, selected, basePalette, emphasizeColors) {
   for (const candidate of candidates) {
     const score =
       scoreHarmonyToBase(candidate, basePalette) * 0.45 +
-      scoreContrast(candidate, selected) * 0.4 +
-      scoreEmphasis(candidate, emphasizeColors) * 0.15
+      scoreContrast(candidate, selected) * 0.35 +
+      scoreEmphasis(candidate, emphasizeColors) * 0.2
 
     if (score > bestScore) {
       best = candidate
@@ -90,12 +83,12 @@ function pickBestNext(candidates, selected, basePalette, emphasizeColors) {
 }
 
 function normalizeColors(colors) {
-  return colors
+  return asArray(colors)
     .map((color, idx) => ({
-      h: normalizeHue(color.h),
-      s: clamp(color.s ?? 70, 0, 100),
-      l: clamp(color.l ?? 50, 0, 100),
-      label: color.label || `Color ${idx + 1}`,
+      h: normalizeHue(color?.h),
+      s: clamp(color?.s ?? 70, 0, 100),
+      l: clamp(color?.l ?? 50, 0, 100),
+      label: color?.label || `Color ${idx + 1}`,
     }))
     .filter(color => Number.isFinite(color.h))
 }
@@ -111,7 +104,7 @@ function dedupeByHue(colors, threshold = 12) {
 }
 
 function isAvoided(color, avoidColors, threshold = 30) {
-  return normalizeColors(avoidColors).some(avoid => hueDist(color.h, avoid.h) < threshold)
+  return avoidColors.some(avoid => hueDist(color.h, avoid.h) < threshold)
 }
 
 function scoreHarmonyToBase(candidate, basePalette) {
@@ -171,4 +164,8 @@ function clamp(value, min, max) {
 function hueDist(a, b) {
   const d = Math.abs(a - b) % 360
   return d > 180 ? 360 - d : d
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : []
 }
