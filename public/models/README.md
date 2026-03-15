@@ -8,7 +8,7 @@ Without these files the app falls back to a basic spectral heuristic — still f
 | File | Size | Purpose |
 |------|------|---------|
 | `essentia-wasm.es.js` | ~2 MB | Essentia.js WebAssembly ES module loader |
-| `essentia-wasm.module.wasm` | ~5 MB | Compiled Essentia WASM binary |
+| `essentia-wasm.module.wasm` | ~5 MB | Compiled Essentia WASM binary (rename/copy to this filename) |
 
 ## Download
 
@@ -20,8 +20,11 @@ Alternatively, install via npm and copy:
 ```bash
 npm install essentia.js
 cp node_modules/essentia.js/dist/essentia-wasm.es.js public/models/
-cp node_modules/essentia.js/dist/essentia-wasm.module.wasm public/models/
+# Different versions may use a different .wasm filename
+WASM_SRC=$(find node_modules/essentia.js/dist -maxdepth 1 -type f -name 'essentia-wasm*.wasm' | head -n 1)
+cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
 ```
+If `WASM_SRC` is empty, run `ls node_modules/essentia.js/dist` and copy whichever `essentia-wasm*.wasm` file exists to `public/models/essentia-wasm.module.wasm`.
 
 ## MAEST Model (Optional — for higher accuracy)
 
