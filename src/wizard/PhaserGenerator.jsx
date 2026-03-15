@@ -1,12 +1,20 @@
 import React, { useState } from 'react'
 import useStore from '../store/appState.js'
 import { generatePhaserPlugin } from '../luagen/generatePhaserPlugin.js'
+import { buildAddressMapFromWizard, setAddressMap } from '../osc/addressMap.js'
 import styles from './Wizard.module.css'
 
 export default function PhaserGenerator() {
-  const { session } = useStore()
+  const { session, updateSession } = useStore()
   const [generated, setGenerated] = useState(false)
   const [luaCode, setLuaCode] = useState('')
+  const phaserCfg = session.phaserConfig || {}
+  const [includePtFast, setIncludePtFast] = useState(phaserCfg.includePtFast ?? true)
+  const [includePanOnly, setIncludePanOnly] = useState(phaserCfg.includePanOnly ?? true)
+  const [includeTiltOnly, setIncludeTiltOnly] = useState(phaserCfg.includeTiltOnly ?? true)
+  const [ptPreset, setPtPreset] = useState(phaserCfg.ptPreset || '')
+  const [panPreset, setPanPreset] = useState(phaserCfg.panPreset || '')
+  const [tiltPreset, setTiltPreset] = useState(phaserCfg.tiltPreset || '')
 
   // Phasers start 8 executors after the color looks (8 genres = exec 0–7, phasers = exec 8+)
   const phaserExecStart = (session.freeExecutorStart || 1) + 8
@@ -16,7 +24,30 @@ export default function PhaserGenerator() {
       fixtureGroups: session.fixtureGroups || [],
       page: session.freeExecutorPage || 2,
       phaserExecStart,
+      includePtFast,
+      includePanOnly,
+      includeTiltOnly,
+      ptPreset,
+      panPreset,
+      tiltPreset,
     })
+    const phaserConfig = {
+      includePtFast,
+      includePanOnly,
+      includeTiltOnly,
+      ptPreset,
+      panPreset,
+      tiltPreset,
+      switchIntervalMs: 180000,
+    }
+    const map = buildAddressMapFromWizard({
+      page: session.freeExecutorPage || 2,
+      startExec: session.freeExecutorStart || 1,
+      phaserConfig,
+    })
+    setAddressMap(map)
+    updateSession({ phaserConfig, addressMap: map })
+
     setLuaCode(code)
     setGenerated(true)
   }
@@ -39,6 +70,36 @@ export default function PhaserGenerator() {
 
   const hasMoverGroups = session.fixtureGroups?.some(g => g.attributes?.pt)
   const hasRgbGroups   = session.fixtureGroups?.some(g => g.attributes?.rgb || g.attributes?.colorWheel)
+  let previewExec = phaserExecStart
+
+  const previewRows = []
+
+  if (hasMoverGroups) {
+    previewRows.push({ label: 'Pan/Tilt Slow phaser', exec: previewExec })
+    previewExec++
+
+    if (includePtFast) {
+      previewRows.push({ label: 'Pan/Tilt Fast phaser', exec: previewExec })
+      previewExec++
+    }
+
+    if (includePanOnly) {
+      previewRows.push({ label: 'Pan-only phaser', exec: previewExec })
+      previewExec++
+    }
+
+    if (includeTiltOnly) {
+      previewRows.push({ label: 'Tilt-only phaser', exec: previewExec })
+      previewExec++
+    }
+  }
+
+  if (hasRgbGroups) {
+    previewRows.push({ label: 'Color Chase phaser', exec: previewExec })
+    previewExec++
+  }
+
+  previewRows.push({ label: 'Dimmer Pulse phaser', exec: previewExec })
 
   return (
     <div>
@@ -66,21 +127,31 @@ export default function PhaserGenerator() {
 
       <div className={styles.card}>
         <div className={styles.label}>What will be created</div>
+        <div style={{ display: 'grid', gap: 10, marginTop: 12, marginBottom: 16 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#aaa' }}>
+            <input type="checkbox" checked={includePtFast} onChange={e => setIncludePtFast(e.target.checked)} />
+            Include PT Fast
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#aaa' }}>
+            <input type="checkbox" checked={includePanOnly} onChange={e => setIncludePanOnly(e.target.checked)} />
+            Include Pan-only
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#aaa' }}>
+            <input type="checkbox" checked={includeTiltOnly} onChange={e => setIncludeTiltOnly(e.target.checked)} />
+            Include Tilt-only
+          </label>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+          <input className={styles.input} placeholder='P/T preset (e.g. 21.1)' value={ptPreset} onChange={e => setPtPreset(e.target.value)} />
+          <input className={styles.input} placeholder='Pan preset (e.g. 21.2)' value={panPreset} onChange={e => setPanPreset(e.target.value)} />
+          <input className={styles.input} placeholder='Tilt preset (e.g. 21.3)' value={tiltPreset} onChange={e => setTiltPreset(e.target.value)} />
+        </div>
         <ul style={{ fontSize: 13, color: '#aaa', lineHeight: 2, paddingLeft: 20, marginTop: 12 }}>
-          {hasMoverGroups ? (
-            <>
-              <li>Pan/Tilt Slow phaser — Page {session.freeExecutorPage}, Exec {phaserExecStart}</li>
-              <li>Pan/Tilt Fast phaser — Page {session.freeExecutorPage}, Exec {phaserExecStart + 1}</li>
-            </>
-          ) : (
-            <li style={{ color: '#555' }}>P/T phasers — skipped (no mover groups defined)</li>
-          )}
-          {hasRgbGroups ? (
-            <li>Color Chase phaser — Page {session.freeExecutorPage}, Exec {phaserExecStart + 2}</li>
-          ) : (
-            <li style={{ color: '#555' }}>Color Chase — skipped (no RGB groups defined)</li>
-          )}
-          <li>Dimmer Pulse phaser — Page {session.freeExecutorPage}, Exec {phaserExecStart + 3}</li>
+          {previewRows.map(row => (
+            <li key={row.label}>{row.label} — Page {session.freeExecutorPage}, Exec {row.exec}</li>
+          ))}
+          {!hasMoverGroups && <li style={{ color: '#555' }}>Mover-based phasers — skipped (no mover groups defined)</li>}
+          {!hasRgbGroups && <li style={{ color: '#555' }}>Color Chase — skipped (no RGB groups defined)</li>}
         </ul>
         <p style={{ fontSize: 12, color: '#555', marginTop: 12 }}>
           Run the main plugin first, then this phaser plugin, then do OSC + Calibration.

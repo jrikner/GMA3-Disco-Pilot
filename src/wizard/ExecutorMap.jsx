@@ -3,21 +3,30 @@ import useStore from '../store/appState.js'
 import { buildAddressMapFromWizard, getAllExecutors } from '../osc/addressMap.js'
 import styles from './Wizard.module.css'
 
-// Number of executor slots the plugin needs
-const EXECUTORS_NEEDED = 8 + 4 + 2  // 8 color looks + 4 phasers + 2 masters = 14
+const getExecutorsNeeded = (phaserConfig = {}) => {
+  const {
+    includePtFast = true,
+    includePanOnly = true,
+    includeTiltOnly = true,
+  } = phaserConfig
+  return 8 + 1 + (includePtFast ? 1 : 0) + (includePanOnly ? 1 : 0) + (includeTiltOnly ? 1 : 0) + 2 + 2
+}
+
 
 export default function ExecutorMap() {
   const { session, updateSession } = useStore()
   const page = session.freeExecutorPage ?? 2
   const startExec = session.freeExecutorStart ?? 1
-  const endExec = startExec + EXECUTORS_NEEDED - 1
+  const phaserConfig = session.phaserConfig || {}
+  const executorsNeeded = getExecutorsNeeded(phaserConfig)
+  const endExec = startExec + executorsNeeded - 1
 
   const setPage = (v) => updateSession({ freeExecutorPage: Number(v) })
   const setStart = (v) => {
     const n = Math.max(1, Number(v))
     updateSession({ freeExecutorStart: n })
     // Pre-build the address map so the LUA generator can use it
-    const map = buildAddressMapFromWizard({ page, startExec: n })
+    const map = buildAddressMapFromWizard({ page, startExec: n, phaserConfig })
     updateSession({ addressMap: map })
   }
 
@@ -28,7 +37,9 @@ export default function ExecutorMap() {
     const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
     genres.forEach(g => rows.push({ exec: exec++, label: `Color Look: ${g}`, type: 'color' }))
     rows.push({ exec: exec++, label: 'Phaser: Pan/Tilt Slow', type: 'phaser' })
-    rows.push({ exec: exec++, label: 'Phaser: Pan/Tilt Fast', type: 'phaser' })
+    if (phaserConfig.includePtFast ?? true) rows.push({ exec: exec++, label: 'Phaser: Pan/Tilt Fast', type: 'phaser' })
+    if (phaserConfig.includePanOnly ?? true) rows.push({ exec: exec++, label: 'Phaser: Pan-only', type: 'phaser' })
+    if (phaserConfig.includeTiltOnly ?? true) rows.push({ exec: exec++, label: 'Phaser: Tilt-only', type: 'phaser' })
     rows.push({ exec: exec++, label: 'Phaser: Color Chase', type: 'phaser' })
     rows.push({ exec: exec++, label: 'Phaser: Dimmer Pulse', type: 'phaser' })
     rows.push({ exec: exec++, label: 'Master: BPM Rate', type: 'master' })
@@ -43,7 +54,7 @@ export default function ExecutorMap() {
       <h2 className={styles.stepTitle}>Free Executor Spaces</h2>
       <p className={styles.stepDesc}>
         Tell the app which page and executor range is free for it to use.
-        The app needs <strong style={{ color: '#a5b4fc' }}>{EXECUTORS_NEEDED} consecutive executor slots</strong>.
+        The app needs <strong style={{ color: '#a5b4fc' }}>{executorsNeeded} consecutive executor slots</strong>.
         It will NEVER touch any executor outside this range.
       </p>
 

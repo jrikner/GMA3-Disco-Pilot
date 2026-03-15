@@ -25,6 +25,8 @@ let activePhaseState = {}
 let lastBpm = 120
 let transitionTimer = null
 let dropCooldown = false
+let moverModeTimer = null
+let moverMix = { pan: 1, tilt: 1 }
 
 // Manual override flags (set from dashboard)
 let lockedGenre = null       // If set, ignore genre detection
@@ -39,6 +41,8 @@ let preBlackoutSnapshot = {}  // key: address → value
 // Drop detection state
 let energyHistory = []
 const ENERGY_HISTORY_LEN = 30
+const MOVER_SWITCH_MS = 180000
+const MIX_STEPS = [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]
 
 // Callbacks
 let dropCallback = null   // () => void — called when a drop is detected
@@ -187,6 +191,8 @@ function switchGenre(genre) {
   if (blackoutActive) return
 
   // Update phasers
+  rotateMoverMode()
+  scheduleMoverModeRotation()
   updatePhasers(profile)
 
   // Update strobe
@@ -194,8 +200,8 @@ function switchGenre(genre) {
 }
 
 function updatePhasers(profile) {
-  const phaserTypes = ['ptSlow', 'ptFast', 'colorChase', 'dimPulse']
-  for (const type of phaserTypes) {
+  const staticPhaserTypes = ['colorChase', 'dimPulse']
+  for (const type of staticPhaserTypes) {
     const exec = addressMap.getPhaserExecutor(type)
     if (!exec) continue
 
@@ -206,6 +212,60 @@ function updatePhasers(profile) {
       oscClient.pressKey(exec.page, exec.exec, shouldEnable)
       activePhaseState[type] = shouldEnable
     }
+  }
+
+  const hasMoverEnergy = Boolean(profile.phasers.ptSlow || profile.phasers.ptFast)
+  const ptSlowExec = addressMap.getPhaserExecutor('ptSlow')
+  const ptFastExec = addressMap.getPhaserExecutor('ptFast')
+  const panOnlyExec = addressMap.getPhaserExecutor('panOnly')
+  const tiltOnlyExec = addressMap.getPhaserExecutor('tiltOnly')
+
+  const mode = activePhaseState.moverMode || 'pt'
+  const disableMover = !hasMoverEnergy || blackoutActive
+
+  const setMover = (type, exec, enabled, level = 1) => {
+    if (!exec) return
+    const shouldEnable = enabled && !disabledPhasers.has(type) && !disableMover
+    const wasEnabled = activePhaseState[type]
+
+    if (shouldEnable) {
+      const boundary = addressMap.getBoundary(exec.page, exec.exec)
+      oscClient.setFader(exec.page, exec.exec, level, boundary)
+    }
+
+    if (shouldEnable !== wasEnabled) {
+      oscClient.pressKey(exec.page, exec.exec, shouldEnable)
+      activePhaseState[type] = shouldEnable
+    }
+  }
+
+  setMover('ptSlow', ptSlowExec, mode === 'ptSlow')
+  setMover('ptFast', ptFastExec, mode === 'ptFast')
+  setMover('panOnly', panOnlyExec, mode !== 'ptSlow' && mode !== 'ptFast', moverMix.pan)
+  setMover('tiltOnly', tiltOnlyExec, mode !== 'ptSlow' && mode !== 'ptFast', moverMix.tilt)
+}
+
+function scheduleMoverModeRotation() {
+  if (moverModeTimer) clearTimeout(moverModeTimer)
+  moverModeTimer = setTimeout(() => {
+    rotateMoverMode()
+    if (activeGenre) {
+      updatePhasers(getProfile(activeGenre))
+      scheduleMoverModeRotation()
+    }
+  }, MOVER_SWITCH_MS)
+}
+
+function rotateMoverMode() {
+  const modes = ['ptSlow', 'ptFast', 'panTiltMix']
+  activePhaseState.moverMode = modes[Math.floor(Math.random() * modes.length)]
+
+  if (activePhaseState.moverMode === 'panTiltMix') {
+    const panDominant = Math.random() > 0.5
+    const low = MIX_STEPS[Math.floor(Math.random() * MIX_STEPS.length)]
+    moverMix = panDominant ? { pan: 1, tilt: low } : { pan: low, tilt: 1 }
+  } else {
+    moverMix = { pan: 1, tilt: 1 }
   }
 }
 
@@ -274,6 +334,9 @@ function detectDrop(energy) {
 function triggerDrop() {
   // Notify dashboard for visual flash
   dropCallback?.()
+
+  rotateMoverMode()
+  if (activeGenre) updatePhasers(getProfile(activeGenre))
 
   if (blackoutActive) return
 
