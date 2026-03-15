@@ -17,6 +17,7 @@
  */
 
 import { GENRE_PROFILES } from '../profiles/genreProfiles.js'
+import { buildCueFriendlyPalette } from '../profiles/paletteAdapter.js'
 
 /**
  * @param {Object} config
@@ -53,7 +54,7 @@ export function generatePlugin(config) {
   for (const genreId of genres) {
     const profile = GENRE_PROFILES[genreId]
     const seqName = `DP_${genreId.toUpperCase()}`
-    const colors = selectColors(profile.colorPalette.colors, avoidColors, emphasizeColors)
+    const colors = selectColors(genreId, avoidColors, emphasizeColors)
 
     lines.push(`  -- ${profile.label} (Page ${page}, Exec ${exec})`)
     lines.push(`  gma.cmd("Store Sequence \\"${seqName}\\"")`)
@@ -210,33 +211,14 @@ function lua(strings, ...values) {
 }
 
 /**
- * Filter/adjust the genre's color palette given user avoid/emphasize preferences.
- * - Remove colors whose hue is within 30° of any avoided color
- * - Prepend emphasized colors if applicable
+ * Build a cue-friendly palette from the genre profile and user constraints.
  */
-function selectColors(palette, avoidColors, emphasizeColors) {
-  const filtered = palette.filter(c =>
-    !avoidColors.some(a => hueDist(c.h, a.h) < 30)
-  )
-
-  const emphasized = emphasizeColors.filter(e =>
-    !avoidColors.some(a => hueDist(e.h, a.h) < 30)
-  )
-
-  const merged = [...emphasized, ...filtered]
-
-  // Ensure at least 1 color
-  if (merged.length === 0) {
-    return [{ h: 200, s: 30, l: 60, label: 'Neutral' }]
-  }
-
-  // Cap at 6 colors
-  return merged.slice(0, 6)
-}
-
-function hueDist(a, b) {
-  const d = Math.abs(a - b) % 360
-  return d > 180 ? 360 - d : d
+function selectColors(genreId, avoidColors, emphasizeColors) {
+  return buildCueFriendlyPalette(genreId, {
+    avoidColors,
+    emphasizeColors,
+    maxColors: 6,
+  })
 }
 
 /**
