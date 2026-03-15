@@ -1,6 +1,11 @@
-import React from 'react'
+import React, { useState } from 'react'
 import useStore from '../store/appState.js'
 import styles from './Wizard.module.css'
+import {
+  getDefaultCapabilities,
+  getFixtureProfile,
+  searchFixtureDefinitions,
+} from '../fixtures/gdtfService.js'
 
 const FIXTURE_TYPES = [
   'Moving Head (Beam)', 'Moving Head (Spot)', 'Moving Head (Wash)',
@@ -22,11 +27,13 @@ const emptyGroup = () => ({
   name: '',
   fixtureType: FIXTURE_TYPES[0],
   maGroupName: '',
-  attributes: { pt: false, rgb: false, colorWheel: false, strobe: false, dimmer: true, zoom: false, gobo: false },
+  attributes: getDefaultCapabilities(),
 })
 
 export default function FixtureGroupGrid() {
   const { session, updateSession } = useStore()
+  const [profileUiState, setProfileUiState] = useState({})
+
   const groups = session.fixtureGroups.length > 0
     ? session.fixtureGroups
     : [emptyGroup()]
@@ -44,6 +51,80 @@ export default function FixtureGroupGrid() {
       fixtureGroups: groups.map(g =>
         g.id === id ? { ...g, attributes: { ...g.attributes, [attrKey]: value } } : g
       ),
+    })
+  }
+
+  const updateProfileState = (id, patch) => {
+    setProfileUiState((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || {}), ...patch },
+    }))
+  }
+
+  const searchProfiles = async (group) => {
+    const state = profileUiState[group.id] || {}
+    const query = state.query || group.fixtureType || group.name || group.maGroupName
+
+    updateProfileState(group.id, { loading: true, error: '', results: [] })
+    const results = await searchFixtureDefinitions({ query })
+
+    if (results.length === 0) {
+      updateProfileState(group.id, {
+        loading: false,
+        results: [],
+        error: 'No online profiles found. You can continue with manual type and attributes.',
+      })
+      return
+    }
+
+    updateProfileState(group.id, {
+      loading: false,
+      error: '',
+      results,
+      selectedProfileId: results[0].id,
+      selectedModeName: results[0].modes?.[0]?.name || '',
+    })
+  }
+
+  const importSelectedProfile = async (group) => {
+    const state = profileUiState[group.id] || {}
+    if (!state.selectedProfileId) return
+
+    const profileSummary = (state.results || []).find(r => r.id === state.selectedProfileId)
+    if (!profileSummary) return
+
+    updateProfileState(group.id, { importing: true, error: '' })
+    const profile = await getFixtureProfile(profileSummary, state.selectedModeName)
+
+    if (!profile) {
+      updateProfileState(group.id, {
+        importing: false,
+        error: 'Could not download this profile right now. Manual workflow is still available.',
+      })
+      return
+    }
+
+    updateSession({
+      fixtureGroups: groups.map(g =>
+        g.id === group.id
+          ? {
+              ...g,
+              fixtureType: profile.fixtureType || g.fixtureType,
+              attributes: {
+                ...getDefaultCapabilities(),
+                ...(profile.capabilities || {}),
+              },
+            }
+          : g
+      ),
+    })
+
+    updateProfileState(group.id, {
+      importing: false,
+      importedLabel: `${profile.manufacturer} ${profile.model}${profile.selectedModeName ? ` (${profile.selectedModeName})` : ''}`,
+      modes: profile.modes || [],
+      selectedModeName: profile.selectedModeName || '',
+      error: '',
     })
   }
 
@@ -79,62 +160,134 @@ export default function FixtureGroupGrid() {
         </p>
       </div>
 
-      {groups.map((group, idx) => (
-        <div key={group.id} className={styles.card}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <span style={{ fontWeight: 600, color: '#a5b4fc' }}>Group {idx + 1}</span>
-            {groups.length > 1 && (
-              <button className={styles.deleteBtn} onClick={() => removeGroup(group.id)}>✕</button>
-            )}
-          </div>
+      {groups.map((group, idx) => {
+        const rowState = profileUiState[group.id] || {}
 
-          <div className={styles.row}>
-            <div style={{ flex: 2 }}>
-              <div className={styles.label}>MA3 Group Name / Number</div>
-              <input
-                className={styles.input}
-                placeholder="e.g. Moving Heads or Group 3"
-                value={group.maGroupName}
-                onChange={e => update(group.id, 'maGroupName', e.target.value)}
-              />
+        return (
+          <div key={group.id} className={styles.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <span style={{ fontWeight: 600, color: '#a5b4fc' }}>Group {idx + 1}</span>
+              {groups.length > 1 && (
+                <button className={styles.deleteBtn} onClick={() => removeGroup(group.id)}>✕</button>
+              )}
             </div>
-            <div style={{ flex: 2 }}>
-              <div className={styles.label}>Friendly Name</div>
-              <input
-                className={styles.input}
-                placeholder="e.g. Stage movers"
-                value={group.name}
-                onChange={e => update(group.id, 'name', e.target.value)}
-              />
-            </div>
-            <div style={{ flex: 2 }}>
-              <div className={styles.label}>Fixture Type</div>
-              <select
-                className={styles.input}
-                value={group.fixtureType}
-                onChange={e => update(group.id, 'fixtureType', e.target.value)}
-                style={{ cursor: 'pointer' }}
-              >
-                {FIXTURE_TYPES.map(t => <option key={t}>{t}</option>)}
-              </select>
-            </div>
-          </div>
 
-          <div className={styles.label} style={{ marginTop: 16 }}>Available Attributes</div>
-          <div className={styles.checkboxRow}>
-            {ATTRIBUTES.map(attr => (
-              <label key={attr.key} className={styles.checkboxLabel}>
+            <div className={styles.row}>
+              <div style={{ flex: 2 }}>
+                <div className={styles.label}>MA3 Group Name / Number</div>
                 <input
-                  type="checkbox"
-                  checked={!!group.attributes[attr.key]}
-                  onChange={e => updateAttr(group.id, attr.key, e.target.checked)}
+                  className={styles.input}
+                  placeholder="e.g. Moving Heads or Group 3"
+                  value={group.maGroupName}
+                  onChange={e => update(group.id, 'maGroupName', e.target.value)}
                 />
-                {attr.label}
-              </label>
-            ))}
+              </div>
+              <div style={{ flex: 2 }}>
+                <div className={styles.label}>Friendly Name</div>
+                <input
+                  className={styles.input}
+                  placeholder="e.g. Stage movers"
+                  value={group.name}
+                  onChange={e => update(group.id, 'name', e.target.value)}
+                />
+              </div>
+              <div style={{ flex: 2 }}>
+                <div className={styles.label}>Fixture Type</div>
+                <select
+                  className={styles.input}
+                  value={group.fixtureType}
+                  onChange={e => update(group.id, 'fixtureType', e.target.value)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {FIXTURE_TYPES.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div className={styles.label}>Select fixture profile (optional)</div>
+              <div className={styles.row}>
+                <div style={{ flex: 3 }}>
+                  <input
+                    className={styles.input}
+                    placeholder="Search manufacturer / model / mode"
+                    value={rowState.query || ''}
+                    onChange={(e) => updateProfileState(group.id, { query: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <button className={styles.addBtn} style={{ marginTop: 0 }} onClick={() => searchProfiles(group)}>
+                    {rowState.loading ? 'Searching…' : 'Search Profiles'}
+                  </button>
+                </div>
+              </div>
+
+              {rowState.results?.length > 0 && (
+                <div className={styles.row} style={{ marginTop: 8 }}>
+                  <div style={{ flex: 3 }}>
+                    <select
+                      className={styles.input}
+                      value={rowState.selectedProfileId || ''}
+                      onChange={(e) => {
+                        const selected = rowState.results.find(r => r.id === e.target.value)
+                        updateProfileState(group.id, {
+                          selectedProfileId: e.target.value,
+                          selectedModeName: selected?.modes?.[0]?.name || '',
+                        })
+                      }}
+                    >
+                      {rowState.results.map((result) => (
+                        <option key={result.id} value={result.id}>
+                          {result.manufacturer} — {result.model}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: 2 }}>
+                    <input
+                      className={styles.input}
+                      placeholder="Mode name (optional)"
+                      value={rowState.selectedModeName || ''}
+                      onChange={(e) => updateProfileState(group.id, { selectedModeName: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <button className={styles.addBtn} style={{ marginTop: 0 }} onClick={() => importSelectedProfile(group)}>
+                      {rowState.importing ? 'Importing…' : 'Import'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {rowState.importedLabel && (
+                <p style={{ marginTop: 8, fontSize: 12, color: '#9ca3af' }}>
+                  Imported profile: {rowState.importedLabel}
+                </p>
+              )}
+
+              {rowState.error && (
+                <p style={{ marginTop: 8, fontSize: 12, color: '#fca5a5' }}>
+                  {rowState.error}
+                </p>
+              )}
+            </div>
+
+            <div className={styles.label} style={{ marginTop: 16 }}>Available Attributes</div>
+            <div className={styles.checkboxRow}>
+              {ATTRIBUTES.map(attr => (
+                <label key={attr.key} className={styles.checkboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={!!group.attributes[attr.key]}
+                    onChange={e => updateAttr(group.id, attr.key, e.target.checked)}
+                  />
+                  {attr.label}
+                </label>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
 
       <button className={styles.addBtn} onClick={addGroup}>
         + Add Fixture Group
