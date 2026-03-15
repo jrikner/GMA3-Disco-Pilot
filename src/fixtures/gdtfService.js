@@ -21,7 +21,12 @@ function safeJsonParse(raw, fallback) {
 
 function loadPersistedCache(cacheKey, targetMap) {
   if (!hasWindow()) return
-  const raw = window.localStorage.getItem(cacheKey)
+  let raw = null
+  try {
+    raw = window.localStorage.getItem(cacheKey)
+  } catch {
+    return
+  }
   if (!raw) return
   const parsed = safeJsonParse(raw, {})
   const now = Date.now()
@@ -37,7 +42,11 @@ function persistCache(cacheKey, sourceMap) {
   sourceMap.forEach((value, key) => {
     serializable[key] = value
   })
-  window.localStorage.setItem(cacheKey, JSON.stringify(serializable))
+  try {
+    window.localStorage.setItem(cacheKey, JSON.stringify(serializable))
+  } catch {
+    // localStorage may be unavailable in privacy-hardened contexts; skip persistence.
+  }
 }
 
 loadPersistedCache(SEARCH_CACHE_KEY, searchCache)
@@ -94,15 +103,18 @@ function normalizeSearchResults(payload) {
 }
 
 function filterByFields(items, params) {
+  const queryNeedle = normalizeText(params.query)
   const manufacturerNeedle = normalizeText(params.manufacturer)
-  const modelNeedle = normalizeText(params.model || params.query)
+  const modelNeedle = normalizeText(params.model)
 
   return items.filter((item) => {
+    const joined = normalizeText([item.manufacturer, item.model].filter(Boolean).join(' '))
+    const matchesQuery = !queryNeedle || joined.includes(queryNeedle)
     const matchesManufacturer = !manufacturerNeedle
       || normalizeText(item.manufacturer).includes(manufacturerNeedle)
     const matchesModel = !modelNeedle
       || normalizeText(item.model).includes(modelNeedle)
-    return matchesManufacturer && matchesModel
+    return matchesQuery && matchesManufacturer && matchesModel
   })
 }
 
