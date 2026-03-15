@@ -51,10 +51,11 @@ export function generatePlugin(config) {
   lines.push(``)
 
   const colorLookSequenceName = "DP_COLOR_LOOKS"
+  const colorLookSequenceNameEscaped = escapeLuaString(colorLookSequenceName)
 
   lines.push(`  -- Shared color sequence (Page ${page}, Exec ${exec})`)
-  lines.push(`  gma.cmd("Store Sequence \"${colorLookSequenceName}\"")`)
-  lines.push(`  gma.cmd("Label Sequence \"${colorLookSequenceName}\" \"DP Color Looks\"")`)
+  lines.push(`  gma.cmd("Store Sequence \\"${colorLookSequenceNameEscaped}\\"")`)
+  lines.push(`  gma.cmd("Label Sequence \\"${colorLookSequenceNameEscaped}\\" \\"DP Color Looks\\"")`)
   lines.push(``)
 
   for (const [genreIndex, genreId] of genres.entries()) {
@@ -67,31 +68,31 @@ export function generatePlugin(config) {
 
     // Select all relevant groups for this look
     for (const group of fixtureGroups) {
-      lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+      lines.push(`  gma.cmd("SelFix Group \\"${escapeLuaString(group.maGroupName)}\\"")`)
     }
 
     if (fixtureGroups.some(g => g.attributes.rgb)) {
       // Blend genre palette into a single representative color
       const blended = blendColors(colors)
-      lines.push(`  gma.cmd("Attribute \"Hue\" at ${blended.h}")`)
-      lines.push(`  gma.cmd("Attribute \"Saturation\" at ${blended.s}")`)
-      lines.push(`  gma.cmd("Attribute \"Dimmer\" at 100")`)
+      lines.push(`  gma.cmd("Attribute \\"Hue\\" at ${blended.h}")`)
+      lines.push(`  gma.cmd("Attribute \\"Saturation\\" at ${blended.s}")`)
+      lines.push(`  gma.cmd("Attribute \\"Dimmer\\" at 100")`)
     }
 
     if (fixtureGroups.some(g => g.attributes.colorWheel)) {
       const blended = blendColors(colors)
       const wheelSlot = hslToWheelSlot(blended.h, blended.s)
-      lines.push(`  gma.cmd("Attribute \"Color1\" at ${wheelSlot}")`)
+      lines.push(`  gma.cmd("Attribute \\"Color1\\" at ${wheelSlot}")`)
     }
 
-    lines.push(`  gma.cmd("Store Sequence \"${colorLookSequenceName}\" Cue ${cueNum} Merge")`)
-    lines.push(`  gma.cmd("Label Cue ${cueNum} Sequence \"${colorLookSequenceName}\" \"${profile.label}\"")`)
-    lines.push(`  gma.cmd("Cue ${cueNum} Sequence \"${colorLookSequenceName}\" property \"FadeTime\" 2")`)
+    lines.push(`  gma.cmd("Store Sequence \\"${colorLookSequenceNameEscaped}\\" Cue ${cueNum} Merge")`)
+    lines.push(`  gma.cmd("Label Cue ${cueNum} Sequence \\"${colorLookSequenceNameEscaped}\\" \\"${escapeLuaString(profile.label)}\\"")`)
+    lines.push(`  gma.cmd("Cue ${cueNum} Sequence \\"${colorLookSequenceNameEscaped}\\" property \\"FadeTime\\" 2")`)
     lines.push(``)
   }
 
-  lines.push(`  gma.cmd("Assign Sequence \"${colorLookSequenceName}\" at Page ${page} Exec ${exec}")`)
-  lines.push(`  gma.cmd("Assign Sequence \"${colorLookSequenceName}\" fadermaster")`)
+  lines.push(`  gma.cmd("Assign Sequence \\"${colorLookSequenceNameEscaped}\\" at Page ${page} Exec ${exec}")`)
+  lines.push(`  gma.cmd("Assign Sequence \\"${colorLookSequenceNameEscaped}\\" fadermaster")`)
   lines.push(``)
   exec++
 
@@ -210,6 +211,12 @@ export function generatePlugin(config) {
 /** Template tag — just returns the string (for syntax highlighting hints) */
 function lua(strings, ...values) {
   return strings.reduce((acc, str, i) => acc + str + (values[i] ?? ''), '')
+}
+
+function escapeLuaString(value) {
+  return String(value)
+    .replaceAll('\\', '\\\\\\\\')
+    .replaceAll('"', '\\\\\\"')
 }
 
 /**
