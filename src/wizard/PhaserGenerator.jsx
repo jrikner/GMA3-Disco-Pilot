@@ -8,8 +8,8 @@ export default function PhaserGenerator() {
   const [generated, setGenerated] = useState(false)
   const [luaCode, setLuaCode] = useState('')
 
-  // Phasers start 8 executors after the color looks (8 genres = exec 0–7, phasers = exec 8+)
-  const phaserExecStart = (session.freeExecutorStart || 1) + 8
+  // Phasers start 1 executor after the shared color look sequence
+  const phaserExecStart = (session.freeExecutorStart || 1) + 1
 
   const generate = () => {
     const code = generatePhaserPlugin({

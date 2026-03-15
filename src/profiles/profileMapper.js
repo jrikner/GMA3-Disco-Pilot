@@ -8,7 +8,7 @@
  *   - BPM rate master updates
  *   - Effect size master (energy-driven)
  *   - Phaser enable/disable per profile
- *   - Color look switching (Go+ on new sequence, fade out old)
+ *   - Color look switching (single sequence cue select per genre)
  *   - Drop detection (energy spike after silence)
  *   - Silence holdback (don't change anything while silent)
  *   - Boundary enforcement (values clamped to calibrated min/max)
@@ -23,7 +23,6 @@ import { getProfile } from './genreProfiles.js'
 let activeGenre = null
 let activePhaseState = {}
 let lastBpm = 120
-let transitionTimer = null
 let dropCooldown = false
 
 // Manual override flags (set from dashboard)
@@ -94,12 +93,10 @@ function _activateBlackout() {
     const boundary = addressMap.getBoundary(exec.page, exec.exec)
     oscClient.setFader(exec.page, exec.exec, boundary.min, boundary)
   }
-  // Kill all color look executors
-  const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
-  for (const genre of genres) {
-    const exec = addressMap.getColorLookExecutor(genre)
-    if (!exec) continue
-    oscClient.pressKey(exec.page, exec.exec, false)
+  // Kill the shared color look sequence executor
+  const colorSequenceExec = addressMap.getColorLookSequence()
+  if (colorSequenceExec) {
+    oscClient.pressKey(colorSequenceExec.page, colorSequenceExec.exec, false)
   }
 }
 
@@ -160,27 +157,14 @@ export function getLastBpm() { return lastBpm }
 
 function switchGenre(genre) {
   const profile = getProfile(genre)
-  const prevGenre = activeGenre
   activeGenre = genre
 
-  // Clear any in-progress transition
-  if (transitionTimer) {
-    clearTimeout(transitionTimer)
-    transitionTimer = null
-  }
 
-  // Switch color look: press key on new sequence
+  // Switch color look by selecting cue on the shared color sequence
   const newLook = addressMap.getColorLookExecutor(genre)
   if (newLook) {
+    oscClient.sendCmd(`Goto Cue ${newLook.cue} Executor ${newLook.page}.${newLook.exec}`)
     oscClient.pressKey(newLook.page, newLook.exec, true)
-  }
-
-  // Fade out previous color look (after transition time)
-  const prevLook = prevGenre ? addressMap.getColorLookExecutor(prevGenre) : null
-  if (prevLook && prevGenre !== genre) {
-    transitionTimer = setTimeout(() => {
-      oscClient.pressKey(prevLook.page, prevLook.exec, false)
-    }, profile.transitionTime * 1000)
   }
 
   // Don't apply anything while blacked out — will restore on release
