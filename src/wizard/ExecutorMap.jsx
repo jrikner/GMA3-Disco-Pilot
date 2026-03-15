@@ -34,8 +34,7 @@ export default function ExecutorMap() {
   const buildPreview = () => {
     let exec = startExec
     const rows = []
-    const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
-    genres.forEach(g => rows.push({ exec: exec++, label: `Color Look: ${g}`, type: 'color' }))
+    rows.push({ exec: exec++, label: 'Color Looks Sequence (cues 1–8)', type: 'color' })
     rows.push({ exec: exec++, label: 'Phaser: Pan/Tilt Slow', type: 'phaser' })
     if (phaserConfig.includePtFast ?? true) rows.push({ exec: exec++, label: 'Phaser: Pan/Tilt Fast', type: 'phaser' })
     if (phaserConfig.includePanOnly ?? true) rows.push({ exec: exec++, label: 'Phaser: Pan-only', type: 'phaser' })

@@ -7,6 +7,27 @@ const FIXTURE_TYPES = [
   'LED PAR', 'LED Bar / Batten', 'Strobe', 'Blinder', 'Other',
 ]
 
+const BASE_ATTRIBUTES = {
+  pt: false,
+  rgb: false,
+  colorWheel: false,
+  strobe: false,
+  dimmer: true,
+  zoom: false,
+  gobo: false,
+}
+
+const FIXTURE_TYPE_DEFAULTS = {
+  'Moving Head (Beam)': { ...BASE_ATTRIBUTES, pt: true, colorWheel: true, strobe: true, dimmer: true, gobo: true },
+  'Moving Head (Spot)': { ...BASE_ATTRIBUTES, pt: true, colorWheel: true, strobe: true, dimmer: true, zoom: true, gobo: true },
+  'Moving Head (Wash)': { ...BASE_ATTRIBUTES, pt: true, rgb: true, strobe: true, dimmer: true, zoom: true },
+  'LED PAR': { ...BASE_ATTRIBUTES, rgb: true, strobe: true, dimmer: true },
+  'LED Bar / Batten': { ...BASE_ATTRIBUTES, rgb: true, strobe: true, dimmer: true },
+  'Strobe': { ...BASE_ATTRIBUTES, strobe: true, dimmer: true },
+  'Blinder': { ...BASE_ATTRIBUTES, dimmer: true, strobe: true },
+  'Other': { ...BASE_ATTRIBUTES, dimmer: true },
+}
+
 const ATTRIBUTES = [
   { key: 'pt',         label: 'Pan / Tilt' },
   { key: 'rgb',        label: 'RGB' },
@@ -17,12 +38,17 @@ const ATTRIBUTES = [
   { key: 'gobo',       label: 'Gobo Wheel' },
 ]
 
+const getDefaultAttributes = (fixtureType) => ({
+  ...BASE_ATTRIBUTES,
+  ...(FIXTURE_TYPE_DEFAULTS[fixtureType] || FIXTURE_TYPE_DEFAULTS.Other),
+})
+
 const emptyGroup = () => ({
   id: Date.now() + Math.random(),
-  name: '',
   fixtureType: FIXTURE_TYPES[0],
   maGroupName: '',
-  attributes: { pt: false, rgb: false, colorWheel: false, strobe: false, dimmer: true, zoom: false, gobo: false },
+  attributesCustomized: false,
+  attributes: getDefaultAttributes(FIXTURE_TYPES[0]),
 })
 
 export default function FixtureGroupGrid() {
@@ -42,8 +68,25 @@ export default function FixtureGroupGrid() {
   const updateAttr = (id, attrKey, value) => {
     updateSession({
       fixtureGroups: groups.map(g =>
-        g.id === id ? { ...g, attributes: { ...g.attributes, [attrKey]: value } } : g
+        g.id === id
+          ? { ...g, attributesCustomized: true, attributes: { ...g.attributes, [attrKey]: value } }
+          : g
       ),
+    })
+  }
+
+  const updateFixtureType = (id, fixtureType) => {
+    updateSession({
+      fixtureGroups: groups.map((g) => {
+        if (g.id !== id) return g
+
+        const defaults = getDefaultAttributes(fixtureType)
+        const attributes = g.attributesCustomized
+          ? { ...defaults, ...g.attributes }
+          : defaults
+
+        return { ...g, fixtureType, attributes }
+      }),
     })
   }
 
@@ -99,20 +142,11 @@ export default function FixtureGroupGrid() {
               />
             </div>
             <div style={{ flex: 2 }}>
-              <div className={styles.label}>Friendly Name</div>
-              <input
-                className={styles.input}
-                placeholder="e.g. Stage movers"
-                value={group.name}
-                onChange={e => update(group.id, 'name', e.target.value)}
-              />
-            </div>
-            <div style={{ flex: 2 }}>
               <div className={styles.label}>Fixture Type</div>
               <select
                 className={styles.input}
                 value={group.fixtureType}
-                onChange={e => update(group.id, 'fixtureType', e.target.value)}
+                onChange={e => updateFixtureType(group.id, e.target.value)}
                 style={{ cursor: 'pointer' }}
               >
                 {FIXTURE_TYPES.map(t => <option key={t}>{t}</option>)}

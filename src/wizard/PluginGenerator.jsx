@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import useStore from '../store/appState.js'
 import { generatePlugin } from '../luagen/generatePlugin.js'
+import { generatePluginXml } from '../luagen/generatePluginXml.js'
 import styles from './Wizard.module.css'
 
 const getExecutorsNeeded = (phaserConfig = {}) => {
@@ -13,6 +14,22 @@ export default function PluginGenerator() {
   const [generated, setGenerated] = useState(false)
   const [luaCode, setLuaCode] = useState('')
   const executorsNeeded = getExecutorsNeeded(session.phaserConfig || {})
+  const [pluginName, setPluginName] = useState('Disco Pilot Generator')
+  const [pluginVersion, setPluginVersion] = useState('1.0.0')
+  const [pluginDescription, setPluginDescription] = useState(
+    'Creates Disco Pilot color looks and helper executors in MA3.',
+  )
+
+  const luaFileName = 'GMA3_Disco_Pilot_Plugin.lua'
+  const xmlFileName = 'GMA3_Disco_Pilot_Plugin.xml'
+
+  const xmlCode = generatePluginXml({
+    pluginName,
+    version: pluginVersion,
+    description: pluginDescription,
+    luaFileName,
+    entryPoint: 'main',
+  })
 
   const generate = () => {
     const code = generatePlugin({
@@ -29,8 +46,9 @@ export default function PluginGenerator() {
 
   const download = async () => {
     const result = await window.electronAPI?.fileSave({
-      defaultName: 'GMA3_Disco_Pilot_Plugin.lua',
+      defaultName: luaFileName,
       content: luaCode,
+      fileType: 'lua',
     })
     if (!result?.success) {
       // Fallback: blob download in browser
@@ -38,7 +56,24 @@ export default function PluginGenerator() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'GMA3_Disco_Pilot_Plugin.lua'
+      a.download = luaFileName
+      a.click()
+      URL.revokeObjectURL(url)
+    }
+  }
+
+  const downloadXml = async () => {
+    const result = await window.electronAPI?.fileSave({
+      defaultName: xmlFileName,
+      content: xmlCode,
+      fileType: 'xml',
+    })
+    if (!result?.success) {
+      const blob = new Blob([xmlCode], { type: 'application/xml' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = xmlFileName
       a.click()
       URL.revokeObjectURL(url)
     }
@@ -84,6 +119,37 @@ export default function PluginGenerator() {
         </p>
       </div>
 
+      <div className={styles.card}>
+        <div className={styles.label}>Plugin metadata (for XML export)</div>
+        <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+          <label style={{ display: 'grid', gap: 6, fontSize: 12, color: '#aaa' }}>
+            Plugin Name
+            <input
+              value={pluginName}
+              onChange={(e) => setPluginName(e.target.value)}
+              style={{ padding: 10, borderRadius: 8, border: '1px solid #2a2a3a', background: '#101018', color: '#e0e0e0' }}
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 6, fontSize: 12, color: '#aaa' }}>
+            Version
+            <input
+              value={pluginVersion}
+              onChange={(e) => setPluginVersion(e.target.value)}
+              style={{ padding: 10, borderRadius: 8, border: '1px solid #2a2a3a', background: '#101018', color: '#e0e0e0' }}
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 6, fontSize: 12, color: '#aaa' }}>
+            Description
+            <textarea
+              value={pluginDescription}
+              onChange={(e) => setPluginDescription(e.target.value)}
+              rows={3}
+              style={{ padding: 10, borderRadius: 8, border: '1px solid #2a2a3a', background: '#101018', color: '#e0e0e0' }}
+            />
+          </label>
+        </div>
+      </div>
+
       {!generated ? (
         <button className={styles.btnPrimary} onClick={generate} style={{ fontSize: 16, padding: '14px 32px' }}>
           Generate Plugin
@@ -94,10 +160,17 @@ export default function PluginGenerator() {
             <button className={styles.btnPrimary} onClick={download}>
               ↓ Download .lua file
             </button>
+            <button className={styles.btnPrimary} onClick={downloadXml}>
+              ↓ Download .xml wrapper
+            </button>
             <button className={styles.btnSecondary} onClick={generate}>
               Regenerate
             </button>
           </div>
+
+          <p style={{ fontSize: 12, color: '#777', marginTop: -12, marginBottom: 16 }}>
+            Bundle/zip export is not currently supported in-app. Export both files and keep them together for MA3 import.
+          </p>
 
           {/* Code preview */}
           <div className={styles.card} style={{ padding: 0, overflow: 'hidden' }}>
