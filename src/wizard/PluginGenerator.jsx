@@ -63,7 +63,7 @@ export default function PluginGenerator() {
       <div className={styles.card}>
         <div className={styles.label}>What will be created</div>
         <ul style={{ fontSize: 13, color: '#aaa', lineHeight: 2, paddingLeft: 20, marginTop: 12 }}>
-          <li>8 color look sequences (one per genre: Techno, EDM, Hip-Hop, Pop, 80s, Latin, Rock, Corporate)</li>
+          <li>1 shared color look sequence with 8 genre cues (Techno, EDM, Hip-Hop, Pop, 80s, Latin, Rock, Corporate)</li>
           <li>2 Pan/Tilt phaser sequences (slow + fast), if you have mover groups</li>
           <li>1 color chase phaser</li>
           <li>1 dimmer pulse phaser</li>
@@ -72,7 +72,7 @@ export default function PluginGenerator() {
         </ul>
         <p style={{ fontSize: 13, color: '#f59e0b', marginTop: 12 }}>
           All sequences will be placed on <strong>Page {session.freeExecutorPage}</strong>,
-          Executors {session.freeExecutorStart}–{(session.freeExecutorStart || 1) + 13}.
+          Executors {session.freeExecutorStart}–{(session.freeExecutorStart || 1) + 6}.
           Nothing outside this range will be touched.
         </p>
       </div>

@@ -4,7 +4,7 @@ import { buildAddressMapFromWizard, getAllExecutors } from '../osc/addressMap.js
 import styles from './Wizard.module.css'
 
 // Number of executor slots the plugin needs
-const EXECUTORS_NEEDED = 8 + 4 + 2  // 8 color looks + 4 phasers + 2 masters = 14
+const EXECUTORS_NEEDED = 1 + 4 + 2  // 1 shared color sequence + 4 phasers + 2 masters = 7
 
 export default function ExecutorMap() {
   const { session, updateSession } = useStore()
@@ -25,8 +25,7 @@ export default function ExecutorMap() {
   const buildPreview = () => {
     let exec = startExec
     const rows = []
-    const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
-    genres.forEach(g => rows.push({ exec: exec++, label: `Color Look: ${g}`, type: 'color' }))
+    rows.push({ exec: exec++, label: 'Color Looks Sequence (cues 1–8)', type: 'color' })
     rows.push({ exec: exec++, label: 'Phaser: Pan/Tilt Slow', type: 'phaser' })
     rows.push({ exec: exec++, label: 'Phaser: Pan/Tilt Fast', type: 'phaser' })
     rows.push({ exec: exec++, label: 'Phaser: Color Chase', type: 'phaser' })
