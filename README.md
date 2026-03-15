@@ -36,21 +36,33 @@ Each profile controls: color look sequence, active phasers (P/T slow, P/T fast, 
 - **macOS** (Electron app; Linux/Windows possible but untested)
 - **GrandMA3** v2.x (software or console) on the same network
 - **OSC** enabled on MA3 (port 8000 by default)
-- **Node.js** ≥ 18 and npm
 - Audio interface or built-in mic routed from the venue PA
 
 ---
 
 ## Getting Started
 
-### 1. Install dependencies
+### 1. Install Node.js
+
+macOS does not come with Node.js pre-installed. The easiest way is [Homebrew](https://brew.sh):
+
+```bash
+# Install Homebrew first if you don't have it
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Then install Node.js
+brew install node
+```
+
+Or download the macOS installer directly from [nodejs.org](https://nodejs.org) (LTS version).
+
+### 2. Install dependencies
 
 ```bash
 npm install
-npm install ws          # for iPad WebSocket bridge
 ```
 
-### 2. Add Essentia model files (recommended)
+### 3. Add Essentia model files (recommended)
 
 Without these the app uses a spectral heuristic fallback — still works, but genre accuracy is much lower. The Home screen shows an amber notice if the files are absent.
 
@@ -60,24 +72,31 @@ cp node_modules/essentia.js/dist/essentia-wasm.es.js public/models/
 cp node_modules/essentia.js/dist/essentia-wasm.module.wasm public/models/
 ```
 
-For the full high-accuracy MAEST model (optional, ~200 MB):
+**Optional: MAEST model for highest accuracy (~200 MB)**
 
+This model gives the app full 519-class music style classification instead of the basic heuristic. Download the file directly:
+
+```bash
+mkdir -p public/models
+curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" \
+     -o public/models/maest-30s-pw.onnx
 ```
-public/models/maest-30s-pw.onnx
-```
 
-Download from: https://huggingface.co/mtg-upf/discogs-maest-30s-pw
+Or if you prefer to download it manually:
+1. Go to [https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l](https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l)
+2. Click the **↓** icon next to `maest-30s-pw.onnx` in the file list
+3. Move the downloaded file to `public/models/maest-30s-pw.onnx`
 
-See [`public/models/README.md`](public/models/README.md) for detailed instructions.
+See [`public/models/README.md`](public/models/README.md) for more details.
 
-### 3. Enable OSC in GrandMA3
+### 4. Enable OSC in GrandMA3
 
 `Menu → System → Network Protocols → OSC`
 - Enable **OSC Input** (so MA3 receives fader/key messages from the app)
 - Enable **OSC Output** on port `8001` (so the app can receive feedback)
 - Confirm your MA3 machine's IP address
 
-### 4. Run the app
+### 5. Run the app
 
 ```bash
 npm run dev
@@ -85,7 +104,7 @@ npm run dev
 
 The Electron window opens. Click **New Session** and work through the 8-step wizard.
 
-### 5. Run the wizard
+### 6. Run the wizard
 
 | Step | What to do |
 |------|-----------|
@@ -166,7 +185,7 @@ The iPad can mirror the full dashboard and send control commands over WebSocket.
 3. On iPad Safari: open `http://[mac-ip]:3030`
 4. The React UI loads in browser mode; buttons relay commands via WebSocket back to the Mac, which translates them to OSC
 
-The WebSocket server runs on the HTTP port + 1. The `ws` npm package is required (`npm install ws`).
+The WebSocket server runs on the HTTP port + 1.
 
 ---
 
@@ -253,7 +272,6 @@ The generated script includes a step-chase alternative in comments — uncomment
 
 ### iPad shows dashboard but buttons do nothing
 
-- The `ws` package must be installed: `npm install ws`
 - Check the Electron terminal for `[WS] iPad connected from ...` — if it's not there the WebSocket connection failed
 - Make sure the iPad is on the same Wi-Fi network as the Mac
 - The HTTP and WebSocket servers start automatically when the dashboard loads. If they didn't start, check the Electron console for errors.
