@@ -42,6 +42,26 @@ Each profile controls: color look sequence, active phasers (P/T slow, P/T fast, 
 
 ## Getting Started
 
+### 0. Clone the repo and go to the project folder
+
+Open Terminal, then run:
+
+```bash
+# (optional) go to the folder where you keep projects
+cd ~/Desktop
+
+# clone this repository
+git clone https://github.com/jrikner/GMA3-Disco-Pilot.git
+
+# enter the project folder
+cd GMA3-Disco-Pilot
+
+# confirm you're in the right place
+pwd
+```
+
+You should now be inside the repo root (`.../GMA3-Disco-Pilot`). Run all `npm` commands from this folder.
+
 ### 1. Install Node.js
 
 macOS does not come with Node.js pre-installed. The easiest way is [Homebrew](https://brew.sh):
@@ -101,6 +121,8 @@ See [`public/models/README.md`](public/models/README.md) for more details.
 ```bash
 npm run dev
 ```
+
+If you see `npm error Missing script: "dev"`, you're usually in the wrong directory. Run `pwd` and make sure you are inside this repo folder, then run `npm run dev` again.
 
 The Electron window opens. Click **New Session** and work through the 8-step wizard.
 
@@ -275,6 +297,30 @@ The generated script includes a step-chase alternative in comments — uncomment
 - Check the Electron terminal for `[WS] iPad connected from ...` — if it's not there the WebSocket connection failed
 - Make sure the iPad is on the same Wi-Fi network as the Mac
 - The HTTP and WebSocket servers start automatically when the dashboard loads. If they didn't start, check the Electron console for errors.
+
+### App launches but the Electron window is black
+
+If Terminal shows `EACCES: permission denied, mkdir ... node_modules/.vite/...`, your `node_modules` files are owned by another user (often from running `sudo npm install` once).
+
+Fix ownership from the project root:
+
+```bash
+sudo chown -R $(whoami) node_modules
+rm -rf node_modules/.vite
+npm install
+npm run dev
+```
+
+If you also see `Failed to resolve import "/models/essentia-wasm.es.js"`, install/copy the optional Essentia model files:
+
+```bash
+mkdir -p public/models
+npm install essentia.js
+cp node_modules/essentia.js/dist/essentia-wasm.es.js public/models/
+cp node_modules/essentia.js/dist/essentia-wasm.module.wasm public/models/
+```
+
+Without Essentia files, the app will still run with the spectral fallback detector, but accuracy is lower.
 
 ### App crashes or freezes on startup (macOS)
 
