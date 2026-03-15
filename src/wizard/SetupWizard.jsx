@@ -3,6 +3,7 @@ import useStore from '../store/appState.js'
 import FixtureGroupGrid from './FixtureGroupGrid.jsx'
 import ColorPreferences from './ColorPreferences.jsx'
 import GenreContext from './GenreContext.jsx'
+import PositionPresetContext from './PositionPresetContext.jsx'
 import ExecutorMap from './ExecutorMap.jsx'
 import PluginGenerator from './PluginGenerator.jsx'
 import PhaserGenerator from './PhaserGenerator.jsx'
@@ -14,6 +15,7 @@ const STEPS = [
   { label: 'Fixture Groups',     component: FixtureGroupGrid },
   { label: 'Color Preferences',  component: ColorPreferences },
   { label: "Tonight's Context",  component: GenreContext },
+  { label: 'Showfile Presets', component: PositionPresetContext },
   { label: 'Free Executor Spaces', component: ExecutorMap },
   { label: 'Generate MA3 Plugin', component: PluginGenerator },
   { label: 'Phaser Plugin',       component: PhaserGenerator },
@@ -60,7 +62,7 @@ export default function SetupWizard() {
 
       {/* Navigation */}
       <div className={styles.nav}>
-        <button className={styles.btnSecondary} onClick={() => setScreen('home')} disabled={wizardStep > 4}>
+        <button className={styles.btnSecondary} onClick={() => setScreen('home')} disabled={wizardStep > 5}>
           Cancel
         </button>
         <div className={styles.navRight}>

@@ -16,6 +16,7 @@ export default function PhaserGenerator() {
       fixtureGroups: session.fixtureGroups || [],
       page: session.freeExecutorPage || 2,
       phaserExecStart,
+      selectedPresetRefs: session.selectedPresetRefs || {},
     })
     setLuaCode(code)
     setGenerated(true)

@@ -30,6 +30,12 @@ const useStore = create((set, get) => ({
     freeExecutorStart: 1,
     addressMap: null,       // built after wizard
     boundaries: {},         // key: `${page}_${exec}` → { min, max }
+    selectedPresetRefs: {    // showfile preset references used by plugin generation
+      ptSlow: '',
+      ptFast: '',
+      colorChase: '',
+      dimPulse: '',
+    },
   },
 
   updateSession: (patch) => set((s) => ({

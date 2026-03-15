@@ -137,11 +137,12 @@ The Electron window opens. Click **New Session** and work through the 8-step wiz
 | 1 — Fixture Groups | Name your fixture groups exactly as they appear in MA3. Tick which attributes each group has (P/T, RGB, strobe, etc.). Give the session a name here. |
 | 2 — Color Preferences | Choose colors to avoid or emphasise across all genre looks. |
 | 3 — Tonight's Context | Tick which genres you expect tonight. These get a 2× confidence boost in detection. |
-| 4 — Free Executor Spaces | Tell the app which page and starting executor number it can use. It needs 14 consecutive free executors. |
-| 5 — Generate MA3 Plugin | Download `GMA3_Disco_Pilot_Plugin.lua`. Import it into MA3 as a Plugin and run it once. It creates 8 color look sequences + 2 master executors. |
-| 6 — Phaser Plugin | Download `GMA3_Disco_Pilot_Phasers.lua`. Run it separately after the main plugin. Creates P/T and effect phasers. Verify in MA3's Effect Engine afterward. |
-| 7 — OSC Connection | Enter your MA3 machine's IP and port. Click Connect. |
-| 8 — Fader Calibration | For each executor the app sweeps the fader while you mark the safe max and min. Saves your profile at the end. |
+| 4 — Showfile Presets | Optional: enter existing MA3 preset references (for P/T slow, P/T fast, color chase, dim pulse). Generated phaser commands apply these first, then Disco Pilot effect recipes. |
+| 5 — Free Executor Spaces | Tell the app which page and starting executor number it can use. It needs 14 consecutive free executors. |
+| 6 — Generate MA3 Plugin | Download `GMA3_Disco_Pilot_Plugin.lua`. Import it into MA3 as a Plugin and run it once. It creates 8 color look sequences + 2 master executors, plus phaser templates. |
+| 7 — Phaser Plugin | Download `GMA3_Disco_Pilot_Phasers.lua`. Run it separately after the main plugin. Creates P/T and effect phasers and injects your selected preset context when configured. |
+| 8 — OSC Connection | Enter your MA3 machine's IP and port. Click Connect. |
+| 9 — Fader Calibration | For each executor the app sweeps the fader while you mark the safe max and min. Saves your profile at the end. |
 
 After calibration you land on the live dashboard. Click **Save Profile** on the calibration complete screen to save — next time load the profile from the Home screen and skip the wizard entirely.
 
@@ -240,6 +241,25 @@ Creates P/T slow, P/T fast, color chase, and dimmer pulse sequences using MA3's 
 4. Store back to the sequence cue
 
 The generated script includes a step-chase alternative in comments — uncomment it if the Effect Engine approach doesn't work for your fixture types.
+
+---
+
+
+### Tested MA3 syntax patterns (v2.x)
+
+The generators now centralize command builders so both plugin files emit the same MA3 syntax patterns.
+
+| Pattern | Example command | Version notes | Fallback |
+|---|---|---|---|
+| Fixture selection | `SelFix Group "<group>"` | Tested on MA3 v2.x syntax family. | If names fail, swap to numeric group IDs. |
+| Attribute set | `Attribute "Hue" at 220` | Stable in v2.x for basic programmer values. | Use direct encoder/programmer values, then re-store cue. |
+| Effect recipe | `Attribute "Pan" Effect Sinus Width 30 Rate 0.3` | Works on many v2.x builds but can vary by fixture profile/effect engine behavior. | Use the generated step-chase block or build phaser manually in Effect Engine. |
+| Phaser seed | `Attribute "Pan" Phaser 1` | Known to parse in v2.x, but may create minimal phaser data only. | Open Effect Engine and define width/rate/phase manually, then store cue. |
+| Store/merge | `Store Sequence "DP_PHASER_PT_SLOW" Cue 1 Merge` | Consistent in v2.x across software and consoles. | Replace `Merge` with `Overwrite` if your workflow requires hard replace. |
+| Assign to executor | `Assign Sequence "DP_PHASER_PT_SLOW" at Page 2 Exec 9` | Stable in v2.x. | Assign manually in Sequence Sheet / Executor view. |
+| Preset context injection | `At Preset 2.101` | Works when preset token resolves in your showfile (`2.101`, `Preset 2.101`, etc.). | Leave preset fields blank in wizard; generated defaults will still run. |
+
+If a command parses but does not produce the expected visual result, treat the generated output as a starter recipe: update in MA3's Effect Engine and re-store the cue. This keeps Disco Pilot's OSC control mapping intact.
 
 ---
 

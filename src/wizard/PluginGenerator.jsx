@@ -15,6 +15,7 @@ export default function PluginGenerator() {
       emphasizeColors: session.emphasizeColors || [],
       page: session.freeExecutorPage,
       startExec: session.freeExecutorStart,
+      selectedPresetRefs: session.selectedPresetRefs || {},
     })
     setLuaCode(code)
     setGenerated(true)
