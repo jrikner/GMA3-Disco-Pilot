@@ -7,16 +7,24 @@ let audioContext = null
 let micStream = null
 let sourceNode = null
 
-export async function startCapture() {
+export async function listAudioDevices() {
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  return devices.filter(d => d.kind === 'audioinput')
+}
+
+export async function startCapture(deviceId = null) {
   if (audioContext) return { audioContext, sourceNode }
 
+  const audioConstraints = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    sampleRate: 44100,
+  }
+  if (deviceId) audioConstraints.deviceId = { exact: deviceId }
+
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false,
-      sampleRate: 44100,
-    },
+    audio: audioConstraints,
   })
 
   micStream = stream

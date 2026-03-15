@@ -30,10 +30,19 @@ let dropCooldown = false
 let lockedGenre = null       // If set, ignore genre detection
 let disabledPhasers = new Set()  // Phaser keys the operator has disabled
 let manualBpm = null         // If set, use this BPM instead of detected
+let blackoutActive = false
+let killStrobeActive = false
+
+// Pre-blackout fader snapshot for restore
+let preBlackoutSnapshot = {}  // key: address → value
 
 // Drop detection state
 let energyHistory = []
 const ENERGY_HISTORY_LEN = 30
+
+// Callbacks
+let dropCallback = null   // () => void — called when a drop is detected
+let historyCallback = null  // ({ ts, genre, bpm, confidence }) => void
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -45,6 +54,62 @@ export function setDisabledPhaser(key, disabled) {
 }
 export function setManualBpm(bpm) { manualBpm = bpm }
 export function clearManualBpm() { manualBpm = null }
+
+export function setDropCallback(cb) { dropCallback = cb }
+export function setHistoryCallback(cb) { historyCallback = cb }
+
+export function setKillStrobe(val) {
+  killStrobeActive = val
+  if (val) {
+    // Immediately kill strobe executor
+    const exec = addressMap.getPhaserExecutor('strobe')
+    if (exec) oscClient.pressKey(exec.page, exec.exec, false)
+  }
+}
+
+export function setBlackout(val) {
+  blackoutActive = val
+  if (val) {
+    _activateBlackout()
+  } else {
+    _restoreFromBlackout()
+  }
+}
+
+function _activateBlackout() {
+  // Snapshot current state then zero every known executor fader
+  const allPhasers = ['ptSlow', 'ptFast', 'colorChase', 'dimPulse', 'strobe']
+  const allMasters = ['bpmRate', 'effectSize']
+
+  for (const type of allPhasers) {
+    const exec = addressMap.getPhaserExecutor(type)
+    if (!exec) continue
+    const address = `/gma3/page${exec.page}/exec${exec.exec}/fader`
+    preBlackoutSnapshot[address] = null  // we don't track fader value, just fire key off
+    oscClient.pressKey(exec.page, exec.exec, false)
+  }
+  for (const type of allMasters) {
+    const exec = addressMap.getMasterExecutor(type)
+    if (!exec) continue
+    const boundary = addressMap.getBoundary(exec.page, exec.exec)
+    oscClient.setFader(exec.page, exec.exec, boundary.min, boundary)
+  }
+  // Kill all color look executors
+  const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
+  for (const genre of genres) {
+    const exec = addressMap.getColorLookExecutor(genre)
+    if (!exec) continue
+    oscClient.pressKey(exec.page, exec.exec, false)
+  }
+}
+
+function _restoreFromBlackout() {
+  // Re-apply current genre profile to restore the look
+  if (activeGenre) {
+    switchGenre(activeGenre)
+    updateBpmMaster(lastBpm)
+  }
+}
 
 /**
  * Called every ~100ms with live audio metrics from BPM detector.
@@ -72,10 +137,11 @@ export function onAudioFrame({ bpm, energy, isSilent }) {
  * Called when genre detector changes the detected genre.
  * Triggers a profile switch (with transition).
  */
-export function onGenreChange(newGenre) {
+export function onGenreChange(newGenre, confidence = 0) {
   const effectiveGenre = lockedGenre ?? newGenre
   if (effectiveGenre === activeGenre) return
 
+  historyCallback?.({ ts: Date.now(), genre: effectiveGenre, bpm: lastBpm, confidence })
   switchGenre(effectiveGenre)
 }
 
@@ -117,6 +183,9 @@ function switchGenre(genre) {
     }, profile.transitionTime * 1000)
   }
 
+  // Don't apply anything while blacked out — will restore on release
+  if (blackoutActive) return
+
   // Update phasers
   updatePhasers(profile)
 
@@ -145,7 +214,7 @@ function updateStrobe(profile) {
   const exec = addressMap.getPhaserExecutor('strobe')
   if (!exec) return
 
-  if (profile.strobeEnabled && !disabledPhasers.has('strobe')) {
+  if (profile.strobeEnabled && !disabledPhasers.has('strobe') && !killStrobeActive) {
     const boundary = addressMap.getBoundary(exec.page, exec.exec)
     const value = profile.strobeIntensity * (boundary.max - boundary.min) + boundary.min
     oscClient.setFader(exec.page, exec.exec, value, boundary)
@@ -203,6 +272,11 @@ function detectDrop(energy) {
 }
 
 function triggerDrop() {
+  // Notify dashboard for visual flash
+  dropCallback?.()
+
+  if (blackoutActive) return
+
   // On a drop: briefly boost effect size to max, then return
   const exec = addressMap.getMasterExecutor('effectSize')
   if (!exec) return

@@ -4,11 +4,16 @@ import useStore from './store/appState.js'
 export default function Home() {
   const { setScreen, updateSession } = useStore()
   const [savedProfiles, setSavedProfiles] = useState([])
+  const [essentiaPresent, setEssentiaPresent] = useState(null)  // null = checking
 
   useEffect(() => {
     window.electronAPI?.profileList().then(r => {
       if (r?.success) setSavedProfiles(r.profiles)
     })
+    // Check if Essentia WASM model is present
+    fetch('/models/essentia-wasm.es.js', { method: 'HEAD' })
+      .then(r => setEssentiaPresent(r.ok))
+      .catch(() => setEssentiaPresent(false))
   }, [])
 
   const loadProfile = async (name) => {
@@ -83,6 +88,23 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {essentiaPresent === false && (
+        <div style={{
+          maxWidth: 480, padding: '12px 16px',
+          background: '#1c1200', border: '1px solid #92400e', borderRadius: 10,
+          fontSize: 12, color: '#aaa', lineHeight: 1.7,
+          WebkitAppRegion: 'no-drag',
+        }}>
+          <strong style={{ color: '#f59e0b' }}>Genre detection running in heuristic mode.</strong>
+          <br />
+          For higher accuracy, add Essentia.js model files to{' '}
+          <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>
+            public/models/
+          </code>
+          — see <code>public/models/README.md</code> for instructions.
+        </div>
+      )}
 
       <p style={{ fontSize: 12, color: '#333' }}>
         First time? Start with New Session to configure your MA3 show and generate the plugin.

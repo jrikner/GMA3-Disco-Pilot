@@ -414,3 +414,44 @@
   transform: translateX(18px);
   background: #6366f1;
 }
+
+/* Panic preset buttons */
+.panicBtn {
+  padding: 9px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.15s;
+}
+
+.panicWhite {
+  background: #1a1a28;
+  border-color: #444;
+  color: #ccc;
+}
+.panicWhite:hover { background: #e0e0e0; color: #000; border-color: #fff; }
+
+.panicBlackout {
+  background: #2d0a0a;
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+.panicBlackout:hover { background: #450a0a; border-color: #ef4444; }
+
+.panicFreeze {
+  background: #0a0a2d;
+  border-color: #1e1e7f;
+  color: #a5a5fc;
+}
+.panicFreeze:hover { background: #12124a; border-color: #6366f1; }
+
+.panicHouse {
+  background: #0a1a0a;
+  border-color: #1a4a1a;
+  color: #86efac;
+}
+.panicHouse:hover { background: #0f2a0f; border-color: #22c55e; }

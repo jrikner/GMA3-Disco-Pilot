@@ -45,6 +45,21 @@ export default function PluginGenerator() {
         Import this file into GrandMA3 as a Plugin and run it once to create all necessary sequences.
       </p>
 
+      {/* Offline test warning */}
+      <div className={styles.card} style={{ borderColor: '#92400e', background: '#1c0e00', marginBottom: 20 }}>
+        <div className={styles.label} style={{ color: '#f59e0b' }}>
+          Run in Offline / Blind Mode First
+        </div>
+        <p style={{ fontSize: 13, color: '#aaa', marginTop: 8, lineHeight: 1.7 }}>
+          This plugin creates sequences and assigns them to executors. It runs in Blind mode
+          to avoid affecting your live show during setup. Always test on a non-live system or
+          in MA3's offline editor before running at a venue.
+          <br /><br />
+          Color look sequences use verified MA3 v2.x syntax and should work reliably.
+          For phaser sequences, use the separate <strong style={{ color: '#e0e0e0' }}>Phaser Plugin</strong> (next step).
+        </p>
+      </div>
+
       <div className={styles.card}>
         <div className={styles.label}>What will be created</div>
         <ul style={{ fontSize: 13, color: '#aaa', lineHeight: 2, paddingLeft: 20, marginTop: 12 }}>

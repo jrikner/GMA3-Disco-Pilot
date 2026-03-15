@@ -64,6 +64,21 @@ export default function FixtureGroupGrid() {
         and check which attributes the fixtures in that group have.
       </p>
 
+      {/* Session name — ask first so the profile can be saved at the end */}
+      <div className={styles.card} style={{ marginBottom: 24 }}>
+        <div className={styles.label}>Session Name</div>
+        <input
+          className={styles.input}
+          placeholder="e.g. Friday Club Night"
+          value={session.name || ''}
+          onChange={e => updateSession({ name: e.target.value })}
+          style={{ maxWidth: 380 }}
+        />
+        <p style={{ fontSize: 12, color: '#555', marginTop: 8 }}>
+          Used when saving this profile — you can reuse it next time to skip the wizard.
+        </p>
+      </div>
+
       {groups.map((group, idx) => (
         <div key={group.id} className={styles.card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>

@@ -173,16 +173,23 @@ export function generatePlugin(config) {
   lines.push(``)
 
   lines.push(`  -- BPM Rate Master (Page ${page}, Exec ${exec})`)
+  lines.push(`  -- The Disco Pilot app sends BPM values to this executor's fader.`)
+  lines.push(`  -- After running: right-click the executor in MA3 → set type to "SpeedMaster"`)
+  lines.push(`  -- so that all sequences using this SpeedMaster follow the BPM.`)
   lines.push(`  gma.cmd("Store Sequence \\"DP_RATE_MASTER\\"")`)
   lines.push(`  gma.cmd("Label Sequence \\"DP_RATE_MASTER\\" \\"DP Rate Master\\"")`)
-  lines.push(`  gma.cmd("Assign Sequence \\"DP_RATE_MASTER\\" at Page ${page} Exec ${exec} Speed")`)
+  lines.push(`  gma.cmd("Assign Sequence \\"DP_RATE_MASTER\\" at Page ${page} Exec ${exec}")`)
+  lines.push(`  -- gma.cmd("Assign SpeedMaster 1 at Page ${page} Exec ${exec}")  -- uncomment if SpeedMaster assignment is preferred`)
   lines.push(``)
   exec++
 
   lines.push(`  -- Effect Size Master (Page ${page}, Exec ${exec})`)
+  lines.push(`  -- After running: right-click the executor → set type to "SizeMaster"`)
+  lines.push(`  -- so that all effect sequences scale their amplitude with this fader.`)
   lines.push(`  gma.cmd("Store Sequence \\"DP_FX_MASTER\\"")`)
   lines.push(`  gma.cmd("Label Sequence \\"DP_FX_MASTER\\" \\"DP Effect Size\\"")`)
-  lines.push(`  gma.cmd("Assign Sequence \\"DP_FX_MASTER\\" at Page ${page} Exec ${exec} Size")`)
+  lines.push(`  gma.cmd("Assign Sequence \\"DP_FX_MASTER\\" at Page ${page} Exec ${exec}")`)
+  lines.push(`  -- gma.cmd("Assign SizeMaster 1 at Page ${page} Exec ${exec}")  -- uncomment if SizeMaster assignment is preferred`)
   lines.push(``)
   exec++
 

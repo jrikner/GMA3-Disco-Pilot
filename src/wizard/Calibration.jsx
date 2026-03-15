@@ -97,14 +97,10 @@ export default function Calibration() {
           All fader boundaries have been saved. The app will now stay within these limits during the show.
         </p>
         <div className={styles.card}>
-          <div className={styles.label}>Session Name</div>
+          <div className={styles.label}>
+            Save Profile{session.name ? ` — "${session.name}"` : ''}
+          </div>
           <div className={styles.row}>
-            <input
-              className={styles.input}
-              placeholder="Friday Club Night"
-              value={session.name || ''}
-              onChange={e => updateSession({ name: e.target.value })}
-            />
             <button className={styles.btnPrimary} onClick={savePersist}>
               Save Profile
             </button>

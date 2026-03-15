@@ -14,6 +14,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // HTTP server for iPad
   httpStart: (opts) => ipcRenderer.invoke('http:start', opts),
 
+  // WebSocket bridge for iPad control
+  wsStart: (opts) => ipcRenderer.invoke('ws:start', opts),
+  wsStop: () => ipcRenderer.invoke('ws:stop'),
+  wsBroadcast: (payload) => ipcRenderer.invoke('ws:broadcast', payload),
+  onWsControl: (cb) => {
+    ipcRenderer.on('ws:control', (_, msg) => cb(msg))
+    return () => ipcRenderer.removeAllListeners('ws:control')
+  },
+  onWsIpadConnected: (cb) => {
+    ipcRenderer.on('ws:ipadConnected', (_, info) => cb(info))
+    return () => ipcRenderer.removeAllListeners('ws:ipadConnected')
+  },
+
   // File operations
   fileSave: (opts) => ipcRenderer.invoke('file:save', opts),
 

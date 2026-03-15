@@ -67,6 +67,8 @@ const useStore = create((set, get) => ({
     disabledPhasers: {},        // { ptSlow: false, ptFast: false, ... }
     manualBpm: null,            // null = auto
     blackout: false,
+    killStrobe: false,
+    holdFreeze: false,          // Lock everything, stop automation
   },
 
   setLockedGenre: (genre) => set((s) => ({
@@ -93,6 +95,27 @@ const useStore = create((set, get) => ({
   setBlackout: (val) => set((s) => ({
     overrides: { ...s.overrides, blackout: val },
   })),
+  setKillStrobe: (val) => set((s) => ({
+    overrides: { ...s.overrides, killStrobe: val },
+  })),
+  setHoldFreeze: (val) => set((s) => ({
+    overrides: { ...s.overrides, holdFreeze: val },
+  })),
+
+  // ── Audio device ─────────────────────────────────────────────────────────────
+  audioDeviceId: null,
+  setAudioDeviceId: (id) => set({ audioDeviceId: id }),
+
+  // ── Session history ──────────────────────────────────────────────────────────
+  history: [],  // [{ ts, genre, bpm, confidence }]
+  appendHistory: (entry) => set((s) => ({ history: [...s.history, entry] })),
+  clearHistory: () => set({ history: [] }),
+
+  // ── Panic presets config ─────────────────────────────────────────────────────
+  panicConfig: {
+    houseDefaultExec: null,  // { page, exec } — set in session if configured
+  },
+  setPanicConfig: (patch) => set((s) => ({ panicConfig: { ...s.panicConfig, ...patch } })),
 }))
 
 export default useStore

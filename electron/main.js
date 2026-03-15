@@ -10,6 +10,7 @@ let mainWindow
 let oscClient = null
 let oscServer = null
 let httpServer = null
+let wsServer = null
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -130,13 +131,79 @@ ipcMain.handle('http:start', (_, { port }) => {
   }
 })
 
+// ── WebSocket Bridge (for iPad control) ──────────────────────────────────────
+// iPad connects to this WebSocket server and sends JSON control commands.
+// Electron forwards them to the renderer, which executes the actions.
+
+ipcMain.handle('ws:start', (_, { port }) => {
+  try {
+    if (wsServer) {
+      wsServer.close()
+      wsServer = null
+    }
+    // Use ws package if available, otherwise skip gracefully
+    let WebSocketServer
+    try {
+      WebSocketServer = require('ws').Server
+    } catch {
+      return { success: false, error: 'ws package not installed. Run: npm install ws' }
+    }
+
+    wsServer = new WebSocketServer({ port })
+    wsServer.on('connection', (socket, req) => {
+      console.log('[WS] iPad connected from', req.socket.remoteAddress)
+      socket.on('message', (data) => {
+        try {
+          const msg = JSON.parse(data.toString())
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ws:control', msg)
+          }
+        } catch (e) {
+          console.warn('[WS] Invalid message:', e.message)
+        }
+      })
+      // Send current state snapshot on connect
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ws:ipadConnected', { remoteAddress: req.socket.remoteAddress })
+      }
+    })
+    wsServer.on('error', (err) => {
+      console.error('[WS] Server error:', err.message)
+    })
+    return { success: true, port }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('ws:stop', () => {
+  if (wsServer) {
+    wsServer.close()
+    wsServer = null
+  }
+  return { success: true }
+})
+
+// Send a state update broadcast to all connected iPad clients
+ipcMain.handle('ws:broadcast', (_, payload) => {
+  if (!wsServer) return { success: false }
+  const msg = JSON.stringify(payload)
+  wsServer.clients.forEach(client => {
+    if (client.readyState === 1) client.send(msg)
+  })
+  return { success: true }
+})
+
 // ── File Save (LUA plugin download) ─────────────────────────────────────────
 
-ipcMain.handle('file:save', async (_, { defaultName, content }) => {
+ipcMain.handle('file:save', async (_, { defaultName, content, fileType }) => {
   const { dialog } = require('electron')
+  const filters = fileType === 'csv'
+    ? [{ name: 'CSV', extensions: ['csv'] }]
+    : [{ name: 'LUA Script', extensions: ['lua'] }]
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: defaultName,
-    filters: [{ name: 'LUA Script', extensions: ['lua'] }],
+    filters,
   })
   if (result.canceled) return { success: false }
   fs.writeFileSync(result.filePath, content, 'utf8')
@@ -175,6 +242,7 @@ app.on('window-all-closed', () => {
   if (oscClient) oscClient.close()
   if (oscServer) oscServer.close()
   if (httpServer) httpServer.close()
+  if (wsServer) wsServer.close()
   if (process.platform !== 'darwin') app.quit()
 })
 

@@ -5,6 +5,7 @@ import ColorPreferences from './ColorPreferences.jsx'
 import GenreContext from './GenreContext.jsx'
 import ExecutorMap from './ExecutorMap.jsx'
 import PluginGenerator from './PluginGenerator.jsx'
+import PhaserGenerator from './PhaserGenerator.jsx'
 import OSCConnect from './OSCConnect.jsx'
 import Calibration from './Calibration.jsx'
 import styles from './Wizard.module.css'
@@ -15,6 +16,7 @@ const STEPS = [
   { label: "Tonight's Context",  component: GenreContext },
   { label: 'Free Executor Spaces', component: ExecutorMap },
   { label: 'Generate MA3 Plugin', component: PluginGenerator },
+  { label: 'Phaser Plugin',       component: PhaserGenerator },
   { label: 'OSC Connection',      component: OSCConnect },
   { label: 'Fader Calibration',   component: Calibration },
 ]
