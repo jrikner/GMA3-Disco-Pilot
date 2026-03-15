@@ -44,32 +44,70 @@ export default function ColorPreferences() {
   const { session, updateSession } = useStore()
   const [customHue, setCustomHue] = useState(200)
   const [customLabel, setCustomLabel] = useState('')
+  const [colorNotice, setColorNotice] = useState('')
 
   const avoidColors = session.avoidColors || []
   const emphasizeColors = session.emphasizeColors || []
 
-  const addAvoid = (color) => {
-    if (avoidColors.find(c => c.label === color.label)) return
-    updateSession({ avoidColors: [...avoidColors, color] })
+  const addColorToTarget = ({ target, color }) => {
+    const trimmedLabel = color.label.trim()
+    if (!trimmedLabel) {
+      setColorNotice('Please provide a label for the custom color.')
+      return false
+    }
+
+    const normalizedLabel = trimmedLabel.toLowerCase()
+    const nextColor = { h: color.h, s: color.s, l: color.l, label: trimmedLabel }
+    const isAvoidTarget = target === 'avoid'
+    const targetList = isAvoidTarget ? avoidColors : emphasizeColors
+    const otherList = isAvoidTarget ? emphasizeColors : avoidColors
+
+    if (targetList.some(c => c.label.toLowerCase() === normalizedLabel)) {
+      setColorNotice(`"${trimmedLabel}" is already in ${isAvoidTarget ? 'Avoid' : 'Emphasize'}.`)
+      return false
+    }
+
+    const conflictInOther = otherList.some(c => c.label.toLowerCase() === normalizedLabel)
+    if (conflictInOther) {
+      setColorNotice(`Moved "${trimmedLabel}" from ${isAvoidTarget ? 'Emphasize' : 'Avoid'} to ${isAvoidTarget ? 'Avoid' : 'Emphasize'}.`)
+      updateSession({
+        avoidColors: isAvoidTarget
+          ? [...avoidColors, nextColor]
+          : avoidColors.filter(c => c.label.toLowerCase() !== normalizedLabel),
+        emphasizeColors: isAvoidTarget
+          ? emphasizeColors.filter(c => c.label.toLowerCase() !== normalizedLabel)
+          : [...emphasizeColors, nextColor],
+      })
+      return true
+    }
+
+    setColorNotice('')
+    updateSession({
+      [isAvoidTarget ? 'avoidColors' : 'emphasizeColors']: [...targetList, nextColor],
+    })
+    return true
   }
+
+  const createCustomColor = () => ({ h: customHue, s: 80, l: 50, label: customLabel })
+
+  const addAvoid = (color) => addColorToTarget({ target: 'avoid', color })
 
   const removeAvoid = (label) => {
     updateSession({ avoidColors: avoidColors.filter(c => c.label !== label) })
   }
 
-  const addEmphasize = (color) => {
-    if (emphasizeColors.find(c => c.label === color.label)) return
-    updateSession({ emphasizeColors: [...emphasizeColors, color] })
-  }
+  const addEmphasize = (color) => addColorToTarget({ target: 'emphasize', color })
 
   const removeEmphasize = (label) => {
     updateSession({ emphasizeColors: emphasizeColors.filter(c => c.label !== label) })
   }
 
-  const addCustomAvoid = () => {
-    if (!customLabel.trim()) return
-    addAvoid({ h: customHue, s: 80, l: 50, label: customLabel.trim() })
-    setCustomLabel('')
+  const addCustomColorToAvoid = () => {
+    if (addAvoid(createCustomColor())) setCustomLabel('')
+  }
+
+  const addCustomColorToEmphasize = () => {
+    if (addEmphasize(createCustomColor())) setCustomLabel('')
   }
 
   return (
@@ -135,17 +173,29 @@ export default function ColorPreferences() {
               placeholder="e.g. Company blue"
               value={customLabel}
               onChange={e => setCustomLabel(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addCustomAvoid()}
+              onKeyDown={e => e.key === 'Enter' && addCustomColorToAvoid()}
             />
           </div>
-          <button
-            className={styles.btnPrimary}
-            style={{ marginTop: 18, padding: '8px 16px' }}
-            onClick={addCustomAvoid}
-          >
-            Add
-          </button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+            <button
+              className={styles.btnSecondary}
+              style={{ padding: '8px 16px' }}
+              onClick={addCustomColorToAvoid}
+            >
+              Add to Avoid
+            </button>
+            <button
+              className={styles.btnPrimary}
+              style={{ padding: '8px 16px' }}
+              onClick={addCustomColorToEmphasize}
+            >
+              Add to Emphasize
+            </button>
+          </div>
         </div>
+        {colorNotice && (
+          <p style={{ marginTop: 8, fontSize: 12, color: '#f59e0b' }}>{colorNotice}</p>
+        )}
       </div>
 
       <div className={styles.card}>
