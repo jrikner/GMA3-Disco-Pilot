@@ -30,6 +30,15 @@ const useStore = create((set, get) => ({
     freeExecutorStart: 1,
     addressMap: null,       // built after wizard
     boundaries: {},         // key: `${page}_${exec}` → { min, max }
+    phaserConfig: {
+      includePtFast: true,
+      includePanOnly: true,
+      includeTiltOnly: true,
+      ptPreset: '',
+      panPreset: '',
+      tiltPreset: '',
+      switchIntervalMs: 180000,
+    },
   },
 
   updateSession: (patch) => set((s) => ({

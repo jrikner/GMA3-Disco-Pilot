@@ -7,8 +7,8 @@
  * MA3 API used: v2.x (gma.cmd(), gma.show.getobj(), gma.show.createobj())
  *
  * What is created:
- *   - 1 color look sequence (DP_COLOR_LOOKS) with one cue per genre, assigned to one executor
- *   - 4 phaser sequences (ptSlow, ptFast, colorChase, dimPulse), for groups with P/T and RGB
+ *   - 8 color look sequences (one per genre), assigned to the declared free executors
+ *   - phaser sequences (ptSlow, optional ptFast/panOnly/tiltOnly, colorChase, dimPulse)
  *   - 1 BPM Rate Master executor
  *   - 1 Effect Size Master executor
  *
@@ -28,7 +28,7 @@ import { GENRE_PROFILES } from '../profiles/genreProfiles.js'
  * @returns {string} LUA script content
  */
 export function generatePlugin(config) {
-  const { fixtureGroups, avoidColors, emphasizeColors, page, startExec } = config
+  const { fixtureGroups, avoidColors, emphasizeColors, page, startExec, phaserConfig = {} } = config
 
   const lines = []
   const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
@@ -106,38 +106,69 @@ export function generatePlugin(config) {
   const rgbGroups = fixtureGroups.filter(g => g.attributes.rgb || g.attributes.colorWheel)
   const dimGroups = fixtureGroups
 
-  // Pan/Tilt Slow phaser
+  const {
+    includePtFast = true,
+    includePanOnly = true,
+    includeTiltOnly = true,
+  } = phaserConfig
+
+  // Pan/Tilt movement phasers
   if (moverGroups.length > 0) {
     lines.push(`  -- P/T Slow Phaser (Page ${page}, Exec ${exec})`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_SLOW\\"")`)
-    lines.push(`  gma.cmd("Label Sequence \\"DP_PHASER_PT_SLOW\\" \\"DP Phaser PT Slow\\"")`)
+    lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_SLOW\"")`)
+    lines.push(`  gma.cmd("Label Sequence \"DP_PHASER_PT_SLOW\" \"DP Phaser PT Slow\"")`)
     for (const group of moverGroups) {
-      lines.push(`  gma.cmd("SelFix Group \\"${group.maGroupName}\\"")`)
+      lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
     }
-    lines.push(`  gma.cmd("Attribute \\"Pan\\" Effect Sinus Width 30 Rate 0.3")`)
-    lines.push(`  gma.cmd("Attribute \\"Tilt\\" Effect Sinus Width 25 Rate 0.3 Phase 90")`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_SLOW\\" Cue 1 Merge")`)
-    lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_PT_SLOW\\" at Page ${page} Exec ${exec}")`)
+    lines.push(`  gma.cmd("Attribute \"Pan\" Effect Sinus Width 30 Rate 0.3")`)
+    lines.push(`  gma.cmd("Attribute \"Tilt\" Effect Sinus Width 25 Rate 0.3 Phase 90")`)
+    lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_SLOW\" Cue 1 Merge")`)
+    lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PT_SLOW\" at Page ${page} Exec ${exec}")`)
     lines.push(``)
     exec++
 
-    // Pan/Tilt Fast phaser
-    lines.push(`  -- P/T Fast Phaser (Page ${page}, Exec ${exec})`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_FAST\\"")`)
-    lines.push(`  gma.cmd("Label Sequence \\"DP_PHASER_PT_FAST\\" \\"DP Phaser PT Fast\\"")`)
-    for (const group of moverGroups) {
-      lines.push(`  gma.cmd("SelFix Group \\"${group.maGroupName}\\"")`)
+    if (includePtFast) {
+      lines.push(`  -- P/T Fast Phaser (Page ${page}, Exec ${exec})`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_FAST\"")`)
+      lines.push(`  gma.cmd("Label Sequence \"DP_PHASER_PT_FAST\" \"DP Phaser PT Fast\"")`)
+      for (const group of moverGroups) {
+        lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+      }
+      lines.push(`  gma.cmd("Attribute \"Pan\" Effect Sinus Width 45 Rate 1.2")`)
+      lines.push(`  gma.cmd("Attribute \"Tilt\" Effect Sinus Width 35 Rate 1.2 Phase 90")`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_FAST\" Cue 1 Merge")`)
+      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PT_FAST\" at Page ${page} Exec ${exec}")`)
+      lines.push(``)
+      exec++
     }
-    lines.push(`  gma.cmd("Attribute \\"Pan\\" Effect Sinus Width 45 Rate 1.2")`)
-    lines.push(`  gma.cmd("Attribute \\"Tilt\\" Effect Sinus Width 35 Rate 1.2 Phase 90")`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_FAST\\" Cue 1 Merge")`)
-    lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_PT_FAST\\" at Page ${page} Exec ${exec}")`)
-    lines.push(``)
-    exec++
+
+    if (includePanOnly) {
+      lines.push(`  -- Pan-only Phaser (Page ${page}, Exec ${exec})`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PAN_ONLY\"")`)
+      for (const group of moverGroups) {
+        lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+      }
+      lines.push(`  gma.cmd("Attribute \"Pan\" Effect Sinus Width 45 Rate 1")`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PAN_ONLY\" Cue 1 Merge")`)
+      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PAN_ONLY\" at Page ${page} Exec ${exec}")`)
+      lines.push(``)
+      exec++
+    }
+
+    if (includeTiltOnly) {
+      lines.push(`  -- Tilt-only Phaser (Page ${page}, Exec ${exec})`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_TILT_ONLY\"")`)
+      for (const group of moverGroups) {
+        lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+      }
+      lines.push(`  gma.cmd("Attribute \"Tilt\" Effect Sinus Width 35 Rate 1")`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_TILT_ONLY\" Cue 1 Merge")`)
+      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_TILT_ONLY\" at Page ${page} Exec ${exec}")`)
+      lines.push(``)
+      exec++
+    }
   } else {
-    // No movers: skip P/T phaser slots but still increment exec to keep map consistent
-    lines.push(`  -- Skipping P/T phasers (no Pan/Tilt groups defined)`)
-    exec += 2
+    lines.push(`  -- Skipping mover phasers (no Pan/Tilt groups defined)`)
   }
 
   // Color Chase phaser

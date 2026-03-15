@@ -28,12 +28,14 @@
  *   phasers: {
  *     ptSlow:    { page: 2, exec: 10 },
  *     ptFast:    { page: 2, exec: 11 },
- *     colorChase:{ page: 2, exec: 12 },
- *     dimPulse:  { page: 2, exec: 13 },
+ *     panOnly:   { page: 2, exec: 12 },
+ *     tiltOnly:  { page: 2, exec: 13 },
+ *     colorChase:{ page: 2, exec: 14 },
+ *     dimPulse:  { page: 2, exec: 15 },
  *   },
  *   masters: {
- *     bpmRate:   { page: 2, exec: 20 },
- *     effectSize:{ page: 2, exec: 21 },
+ *     bpmRate:   { page: 2, exec: 16 },
+ *     effectSize:{ page: 2, exec: 17 },
  *   }
  * }
  */
@@ -90,7 +92,7 @@ export function getMasterExecutor(type) {
  *   { page: number, startExec: number }
  */
 export function buildAddressMapFromWizard(wizardConfig) {
-  const { page, startExec } = wizardConfig
+  const { page, startExec, phaserConfig = {} } = wizardConfig
   let exec = startExec
 
   const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
@@ -103,12 +105,22 @@ export function buildAddressMapFromWizard(wizardConfig) {
     cueMap,
   }
 
+  const {
+    includePtFast = true,
+    includePanOnly = true,
+    includeTiltOnly = true,
+  } = phaserConfig
+
   const phasers = {
-    ptSlow:     { page, exec: exec++ },
-    ptFast:     { page, exec: exec++ },
-    colorChase: { page, exec: exec++ },
-    dimPulse:   { page, exec: exec++ },
+    ptSlow: { page, exec: exec++ },
   }
+
+  if (includePtFast) phasers.ptFast = { page, exec: exec++ }
+  if (includePanOnly) phasers.panOnly = { page, exec: exec++ }
+  if (includeTiltOnly) phasers.tiltOnly = { page, exec: exec++ }
+
+  phasers.colorChase = { page, exec: exec++ }
+  phasers.dimPulse = { page, exec: exec++ }
 
   const masters = {
     bpmRate:    { page, exec: exec++ },

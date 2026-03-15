@@ -23,6 +23,8 @@ import styles from './Dashboard.module.css'
 const PHASER_DEFS = [
   { key: 'ptSlow',     label: 'P/T Slow' },
   { key: 'ptFast',     label: 'P/T Fast' },
+  { key: 'panOnly',    label: 'Pan-only' },
+  { key: 'tiltOnly',   label: 'Tilt-only' },
   { key: 'colorChase', label: 'Color Chase' },
   { key: 'dimPulse',   label: 'Dimmer Pulse' },
 ]
@@ -698,7 +700,8 @@ export default function Dashboard() {
         <div className={styles.panelTitle}>Phasers</div>
         {PHASER_DEFS.map(p => {
           const isDisabled = !!overrides.disabledPhasers[p.key]
-          const isActive = !isDisabled && profile.phasers[p.key]
+          const moverProfileActive = (p.key === 'panOnly' || p.key === 'tiltOnly') && (profile.phasers.ptSlow || profile.phasers.ptFast)
+          const isActive = !isDisabled && (profile.phasers[p.key] || moverProfileActive)
           return (
             <div key={p.key} className={styles.phaserRow}>
               <span className={styles.phaserLabel}>

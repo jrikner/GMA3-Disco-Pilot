@@ -4,10 +4,16 @@ import { generatePlugin } from '../luagen/generatePlugin.js'
 import { generatePluginXml } from '../luagen/generatePluginXml.js'
 import styles from './Wizard.module.css'
 
+const getExecutorsNeeded = (phaserConfig = {}) => {
+  const { includePtFast = true, includePanOnly = true, includeTiltOnly = true } = phaserConfig
+  return 8 + 1 + (includePtFast ? 1 : 0) + (includePanOnly ? 1 : 0) + (includeTiltOnly ? 1 : 0) + 2 + 2
+}
+
 export default function PluginGenerator() {
   const { session } = useStore()
   const [generated, setGenerated] = useState(false)
   const [luaCode, setLuaCode] = useState('')
+  const executorsNeeded = getExecutorsNeeded(session.phaserConfig || {})
   const [pluginName, setPluginName] = useState('Disco Pilot Generator')
   const [pluginVersion, setPluginVersion] = useState('1.0.0')
   const [pluginDescription, setPluginDescription] = useState(
@@ -32,6 +38,7 @@ export default function PluginGenerator() {
       emphasizeColors: session.emphasizeColors || [],
       page: session.freeExecutorPage,
       startExec: session.freeExecutorStart,
+      phaserConfig: session.phaserConfig || {},
     })
     setLuaCode(code)
     setGenerated(true)
@@ -98,8 +105,8 @@ export default function PluginGenerator() {
       <div className={styles.card}>
         <div className={styles.label}>What will be created</div>
         <ul style={{ fontSize: 13, color: '#aaa', lineHeight: 2, paddingLeft: 20, marginTop: 12 }}>
-          <li>1 shared color look sequence with 8 genre cues (Techno, EDM, Hip-Hop, Pop, 80s, Latin, Rock, Corporate)</li>
-          <li>2 Pan/Tilt phaser sequences (slow + fast), if you have mover groups</li>
+          <li>8 color look sequences (one per genre: Techno, EDM, Hip-Hop, Pop, 80s, Latin, Rock, Corporate)</li>
+          <li>Mover phaser sequences: P/T Slow + optional P/T Fast, Pan-only, Tilt-only</li>
           <li>1 color chase phaser</li>
           <li>1 dimmer pulse phaser</li>
           <li>1 BPM Rate Master executor</li>
@@ -107,7 +114,7 @@ export default function PluginGenerator() {
         </ul>
         <p style={{ fontSize: 13, color: '#f59e0b', marginTop: 12 }}>
           All sequences will be placed on <strong>Page {session.freeExecutorPage}</strong>,
-          Executors {session.freeExecutorStart}–{(session.freeExecutorStart || 1) + 6}.
+          Executors {session.freeExecutorStart}–{(session.freeExecutorStart || 1) + executorsNeeded - 1}.
           Nothing outside this range will be touched.
         </p>
       </div>
