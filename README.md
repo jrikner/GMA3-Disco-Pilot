@@ -77,6 +77,7 @@ cp node_modules/essentia.js/dist/essentia-wasm.module.wasm public/models/
 This model gives the app full 519-class music style classification instead of the basic heuristic. Download the file directly:
 
 ```bash
+mkdir -p public/models
 curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" \
      -o public/models/maest-30s-pw.onnx
 ```

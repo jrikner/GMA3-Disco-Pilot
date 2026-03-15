@@ -34,6 +34,7 @@ The app can use the Discogs MAEST-30s model for 519-class music style classifica
 Download with curl:
 
 ```bash
+mkdir -p public/models
 curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" \
      -o public/models/maest-30s-pw.onnx
 ```
