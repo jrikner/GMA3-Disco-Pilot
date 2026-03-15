@@ -22,7 +22,7 @@ const useStore = create((set, get) => ({
   // ── Session config (set during wizard) ─────────────────────────────────────
   session: {
     name: '',
-    fixtureGroups: [],      // [{ name, fixtureType, attributes: {pt, rgb, colorWheel, strobe, dimmer, zoom} }]
+    fixtureGroups: [],      // [{ fixtureType, attributes: {pt, rgb, colorWheel, strobe, dimmer, zoom} }]
     avoidColors: [],        // [{ h, s, l, label }]
     emphasizeColors: [],    // [{ h, s, l, label }]
     tonightContexts: [],    // ['edm', 'hiphop', ...]
