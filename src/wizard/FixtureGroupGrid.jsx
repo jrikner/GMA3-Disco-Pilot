@@ -45,7 +45,6 @@ const getDefaultAttributes = (fixtureType) => ({
 
 const emptyGroup = () => ({
   id: Date.now() + Math.random(),
-  name: '',
   fixtureType: FIXTURE_TYPES[0],
   maGroupName: '',
   attributesCustomized: false,
@@ -140,15 +139,6 @@ export default function FixtureGroupGrid() {
                 placeholder="e.g. Moving Heads or Group 3"
                 value={group.maGroupName}
                 onChange={e => update(group.id, 'maGroupName', e.target.value)}
-              />
-            </div>
-            <div style={{ flex: 2 }}>
-              <div className={styles.label}>Friendly Name</div>
-              <input
-                className={styles.input}
-                placeholder="e.g. Stage movers"
-                value={group.name}
-                onChange={e => update(group.id, 'name', e.target.value)}
               />
             </div>
             <div style={{ flex: 2 }}>
