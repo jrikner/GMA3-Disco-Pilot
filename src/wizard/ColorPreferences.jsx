@@ -148,15 +148,22 @@ export default function ColorPreferences() {
           ))}
         </div>
 
-        {/* Custom color picker */}
-        <div className={styles.row} style={{ marginTop: 16 }}>
+      </div>
+
+      <div className={styles.card}>
+        <div className={styles.label}>Special Color Hue</div>
+        <p style={{ fontSize: 13, color: '#666', marginBottom: 16 }}>
+          Create a custom hue and quickly add it to either Avoid or Emphasize.
+        </p>
+
+        <div className={styles.row}>
           <div>
             <div className={styles.label}>Custom hue</div>
             <input
               type="range" min={0} max={360}
               value={customHue}
               onChange={e => setCustomHue(Number(e.target.value))}
-              style={{ width: 120, accentColor: `hsl(${customHue}, 80%, 50%)` }}
+              style={{ width: 160, accentColor: `hsl(${customHue}, 80%, 50%)` }}
             />
             <span
               style={{
@@ -193,6 +200,7 @@ export default function ColorPreferences() {
             </button>
           </div>
         </div>
+
         {colorNotice && (
           <p style={{ marginTop: 8, fontSize: 12, color: '#f59e0b' }}>{colorNotice}</p>
         )}
