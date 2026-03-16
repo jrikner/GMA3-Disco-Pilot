@@ -29,7 +29,15 @@ import { buildCueFriendlyPalette } from '../profiles/paletteAdapter.js'
  * @returns {string} LUA script content
  */
 export function generatePlugin(config) {
-  const { fixtureGroups, avoidColors, emphasizeColors, page, startExec, phaserConfig = {} } = config
+  const {
+    fixtureGroups,
+    avoidColors,
+    emphasizeColors,
+    page,
+    startExec,
+    phaserConfig = {},
+    positionPreset,
+  } = config
 
   const lines = []
   const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
@@ -40,7 +48,7 @@ export function generatePlugin(config) {
   lines.push(lua`-- DO NOT EDIT — regenerate via the Disco Pilot app`)
   lines.push(``)
   lines.push(`local function main()`)
-  lines.push(`  gma.cmd("BlindEdit On")`)
+  lines.push(`  Cmd("BlindEdit On")`)
   lines.push(``)
 
   let exec = startExec
@@ -55,8 +63,8 @@ export function generatePlugin(config) {
   const colorLookSequenceNameEscaped = escapeLuaString(colorLookSequenceName)
 
   lines.push(`  -- Shared color sequence (Page ${page}, Exec ${exec})`)
-  lines.push(`  gma.cmd("Store Sequence \\"${colorLookSequenceNameEscaped}\\"")`)
-  lines.push(`  gma.cmd("Label Sequence \\"${colorLookSequenceNameEscaped}\\" \\"DP Color Looks\\"")`)
+  lines.push(`  Cmd("Store Sequence \\"${colorLookSequenceNameEscaped}\\"")`)
+  lines.push(`  Cmd("Label Sequence \\"${colorLookSequenceNameEscaped}\\" \\"DP Color Looks\\"")`)
   lines.push(``)
 
   for (const [genreIndex, genreId] of genres.entries()) {
@@ -65,35 +73,35 @@ export function generatePlugin(config) {
     const cueNum = genreIndex + 1
 
     lines.push(`  -- Cue ${cueNum}: ${profile.label}`)
-    lines.push(`  gma.cmd("ClearAll")`)
+    lines.push(`  Cmd("ClearAll")`)
 
     // Select all relevant groups for this look
     for (const group of fixtureGroups) {
-      lines.push(`  gma.cmd("SelFix Group \\"${escapeLuaString(group.maGroupName)}\\"")`)
+      lines.push(`  Cmd("SelFix Group \\"${escapeLuaString(group.maGroupName)}\\"")`)
     }
 
     if (fixtureGroups.some(g => g.attributes.rgb)) {
       // Blend genre palette into a single representative color
       const blended = blendColors(colors)
-      lines.push(`  gma.cmd("Attribute \\"Hue\\" at ${blended.h}")`)
-      lines.push(`  gma.cmd("Attribute \\"Saturation\\" at ${blended.s}")`)
-      lines.push(`  gma.cmd("Attribute \\"Dimmer\\" at 100")`)
+      lines.push(`  Cmd("Attribute \\"Hue\\" at ${blended.h}")`)
+      lines.push(`  Cmd("Attribute \\"Saturation\\" at ${blended.s}")`)
+      lines.push(`  Cmd("Attribute \\"Dimmer\\" at 100")`)
     }
 
     if (fixtureGroups.some(g => g.attributes.colorWheel)) {
       const blended = blendColors(colors)
       const wheelSlot = hslToWheelSlot(blended.h, blended.s)
-      lines.push(`  gma.cmd("Attribute \\"Color1\\" at ${wheelSlot}")`)
+      lines.push(`  Cmd("Attribute \\"Color1\\" at ${wheelSlot}")`)
     }
 
-    lines.push(`  gma.cmd("Store Sequence \\"${colorLookSequenceNameEscaped}\\" Cue ${cueNum} Merge")`)
-    lines.push(`  gma.cmd("Label Cue ${cueNum} Sequence \\"${colorLookSequenceNameEscaped}\\" \\"${escapeLuaString(profile.label)}\\"")`)
-    lines.push(`  gma.cmd("Cue ${cueNum} Sequence \\"${colorLookSequenceNameEscaped}\\" property \\"FadeTime\\" 2")`)
+    lines.push(`  Cmd("Store Sequence \\"${colorLookSequenceNameEscaped}\\" Cue ${cueNum} Merge")`)
+    lines.push(`  Cmd("Label Cue ${cueNum} Sequence \\"${colorLookSequenceNameEscaped}\\" \\"${escapeLuaString(profile.label)}\\"")`)
+    lines.push(`  Cmd("Cue ${cueNum} Sequence \\"${colorLookSequenceNameEscaped}\\" property \\"FadeTime\\" 2")`)
     lines.push(``)
   }
 
-  lines.push(`  gma.cmd("Assign Sequence \\"${colorLookSequenceNameEscaped}\\" at Page ${page} Exec ${exec}")`)
-  lines.push(`  gma.cmd("Assign Sequence \\"${colorLookSequenceNameEscaped}\\" fadermaster")`)
+  lines.push(`  Cmd("Assign Sequence \\"${colorLookSequenceNameEscaped}\\" at Page ${page} Exec ${exec}")`)
+  lines.push(`  Cmd("Assign Sequence \\"${colorLookSequenceNameEscaped}\\" fadermaster")`)
   lines.push(``)
   exec++
 
@@ -107,6 +115,16 @@ export function generatePlugin(config) {
   const rgbGroups = fixtureGroups.filter(g => g.attributes.rgb || g.attributes.colorWheel)
   const dimGroups = fixtureGroups
 
+  const hasPositionPreset = Number.isInteger(positionPreset) && positionPreset > 0
+  if (hasPositionPreset && moverGroups.length > 0) {
+    lines.push(`  -- Apply shared base position preset (Preset 2.${positionPreset}) before motion cues`)
+    for (const group of moverGroups) {
+      lines.push(`  Cmd("SelFix Group \"${escapeLuaString(group.maGroupName)}\"")`)
+    }
+    lines.push(`  Cmd("At Preset 2.${positionPreset}")`)
+    lines.push(``)
+  }
+
   const {
     includePtFast = true,
     includePanOnly = true,
@@ -116,55 +134,55 @@ export function generatePlugin(config) {
   // Pan/Tilt movement phasers
   if (moverGroups.length > 0) {
     lines.push(`  -- P/T Slow Phaser (Page ${page}, Exec ${exec})`)
-    lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_SLOW\"")`)
-    lines.push(`  gma.cmd("Label Sequence \"DP_PHASER_PT_SLOW\" \"DP Phaser PT Slow\"")`)
+    lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT_SLOW\"")`)
+    lines.push(`  Cmd("Label Sequence \"DP_PHASER_PT_SLOW\" \"DP Phaser PT Slow\"")`)
     for (const group of moverGroups) {
-      lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+      lines.push(`  Cmd("SelFix Group \"${group.maGroupName}\"")`)
     }
-    lines.push(`  gma.cmd("Attribute \"Pan\" Effect Sinus Width 30 Rate 0.3")`)
-    lines.push(`  gma.cmd("Attribute \"Tilt\" Effect Sinus Width 25 Rate 0.3 Phase 90")`)
-    lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_SLOW\" Cue 1 Merge")`)
-    lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PT_SLOW\" at Page ${page} Exec ${exec}")`)
+    lines.push(`  Cmd("Attribute \"Pan\" Effect Sinus Width 30 Rate 0.3")`)
+    lines.push(`  Cmd("Attribute \"Tilt\" Effect Sinus Width 25 Rate 0.3 Phase 90")`)
+    lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT_SLOW\" Cue 1 Merge")`)
+    lines.push(`  Cmd("Assign Sequence \"DP_PHASER_PT_SLOW\" at Page ${page} Exec ${exec}")`)
     lines.push(``)
     exec++
 
     if (includePtFast) {
       lines.push(`  -- P/T Fast Phaser (Page ${page}, Exec ${exec})`)
-      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_FAST\"")`)
-      lines.push(`  gma.cmd("Label Sequence \"DP_PHASER_PT_FAST\" \"DP Phaser PT Fast\"")`)
+      lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT_FAST\"")`)
+      lines.push(`  Cmd("Label Sequence \"DP_PHASER_PT_FAST\" \"DP Phaser PT Fast\"")`)
       for (const group of moverGroups) {
-        lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+        lines.push(`  Cmd("SelFix Group \"${group.maGroupName}\"")`)
       }
-      lines.push(`  gma.cmd("Attribute \"Pan\" Effect Sinus Width 45 Rate 1.2")`)
-      lines.push(`  gma.cmd("Attribute \"Tilt\" Effect Sinus Width 35 Rate 1.2 Phase 90")`)
-      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_FAST\" Cue 1 Merge")`)
-      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PT_FAST\" at Page ${page} Exec ${exec}")`)
+      lines.push(`  Cmd("Attribute \"Pan\" Effect Sinus Width 45 Rate 1.2")`)
+      lines.push(`  Cmd("Attribute \"Tilt\" Effect Sinus Width 35 Rate 1.2 Phase 90")`)
+      lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT_FAST\" Cue 1 Merge")`)
+      lines.push(`  Cmd("Assign Sequence \"DP_PHASER_PT_FAST\" at Page ${page} Exec ${exec}")`)
       lines.push(``)
       exec++
     }
 
     if (includePanOnly) {
       lines.push(`  -- Pan-only Phaser (Page ${page}, Exec ${exec})`)
-      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PAN_ONLY\"")`)
+      lines.push(`  Cmd("Store Sequence \"DP_PHASER_PAN_ONLY\"")`)
       for (const group of moverGroups) {
-        lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+        lines.push(`  Cmd("SelFix Group \"${group.maGroupName}\"")`)
       }
-      lines.push(`  gma.cmd("Attribute \"Pan\" Effect Sinus Width 45 Rate 1")`)
-      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PAN_ONLY\" Cue 1 Merge")`)
-      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PAN_ONLY\" at Page ${page} Exec ${exec}")`)
+      lines.push(`  Cmd("Attribute \"Pan\" Effect Sinus Width 45 Rate 1")`)
+      lines.push(`  Cmd("Store Sequence \"DP_PHASER_PAN_ONLY\" Cue 1 Merge")`)
+      lines.push(`  Cmd("Assign Sequence \"DP_PHASER_PAN_ONLY\" at Page ${page} Exec ${exec}")`)
       lines.push(``)
       exec++
     }
 
     if (includeTiltOnly) {
       lines.push(`  -- Tilt-only Phaser (Page ${page}, Exec ${exec})`)
-      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_TILT_ONLY\"")`)
+      lines.push(`  Cmd("Store Sequence \"DP_PHASER_TILT_ONLY\"")`)
       for (const group of moverGroups) {
-        lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+        lines.push(`  Cmd("SelFix Group \"${group.maGroupName}\"")`)
       }
-      lines.push(`  gma.cmd("Attribute \"Tilt\" Effect Sinus Width 35 Rate 1")`)
-      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_TILT_ONLY\" Cue 1 Merge")`)
-      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_TILT_ONLY\" at Page ${page} Exec ${exec}")`)
+      lines.push(`  Cmd("Attribute \"Tilt\" Effect Sinus Width 35 Rate 1")`)
+      lines.push(`  Cmd("Store Sequence \"DP_PHASER_TILT_ONLY\" Cue 1 Merge")`)
+      lines.push(`  Cmd("Assign Sequence \"DP_PHASER_TILT_ONLY\" at Page ${page} Exec ${exec}")`)
       lines.push(``)
       exec++
     }
@@ -175,14 +193,14 @@ export function generatePlugin(config) {
   // Color Chase phaser
   if (rgbGroups.length > 0) {
     lines.push(`  -- Color Chase (Page ${page}, Exec ${exec})`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_COLOR\\"")`)
-    lines.push(`  gma.cmd("Label Sequence \\"DP_PHASER_COLOR\\" \\"DP Color Chase\\"")`)
+    lines.push(`  Cmd("Store Sequence \\"DP_PHASER_COLOR\\"")`)
+    lines.push(`  Cmd("Label Sequence \\"DP_PHASER_COLOR\\" \\"DP Color Chase\\"")`)
     for (const group of rgbGroups) {
-      lines.push(`  gma.cmd("SelFix Group \\"${group.maGroupName}\\"")`)
+      lines.push(`  Cmd("SelFix Group \\"${group.maGroupName}\\"")`)
     }
-    lines.push(`  gma.cmd("Attribute \\"Hue\\" Effect Sinus Width 180 Rate 0.5")`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_COLOR\\" Cue 1 Merge")`)
-    lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_COLOR\\" at Page ${page} Exec ${exec}")`)
+    lines.push(`  Cmd("Attribute \\"Hue\\" Effect Sinus Width 180 Rate 0.5")`)
+    lines.push(`  Cmd("Store Sequence \\"DP_PHASER_COLOR\\" Cue 1 Merge")`)
+    lines.push(`  Cmd("Assign Sequence \\"DP_PHASER_COLOR\\" at Page ${page} Exec ${exec}")`)
     lines.push(``)
     exec++
   } else {
@@ -191,14 +209,14 @@ export function generatePlugin(config) {
 
   // Dimmer Pulse phaser
   lines.push(`  -- Dimmer Pulse (Page ${page}, Exec ${exec})`)
-  lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_DIM\\"")`)
-  lines.push(`  gma.cmd("Label Sequence \\"DP_PHASER_DIM\\" \\"DP Dimmer Pulse\\"")`)
+  lines.push(`  Cmd("Store Sequence \\"DP_PHASER_DIM\\"")`)
+  lines.push(`  Cmd("Label Sequence \\"DP_PHASER_DIM\\" \\"DP Dimmer Pulse\\"")`)
   for (const group of dimGroups) {
-    lines.push(`  gma.cmd("SelFix Group \\"${group.maGroupName}\\"")`)
+    lines.push(`  Cmd("SelFix Group \\"${group.maGroupName}\\"")`)
   }
-  lines.push(`  gma.cmd("Attribute \\"Dimmer\\" Effect Square Width 50 Rate 1")`)
-  lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_DIM\\" Cue 1 Merge")`)
-  lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_DIM\\" at Page ${page} Exec ${exec}")`)
+  lines.push(`  Cmd("Attribute \\"Dimmer\\" Effect Square Width 50 Rate 1")`)
+  lines.push(`  Cmd("Store Sequence \\"DP_PHASER_DIM\\" Cue 1 Merge")`)
+  lines.push(`  Cmd("Assign Sequence \\"DP_PHASER_DIM\\" at Page ${page} Exec ${exec}")`)
   lines.push(``)
   exec++
 
@@ -212,28 +230,28 @@ export function generatePlugin(config) {
   lines.push(`  -- The Disco Pilot app sends BPM values to this executor's fader.`)
   lines.push(`  -- After running: right-click the executor in MA3 → set type to "SpeedMaster"`)
   lines.push(`  -- so that all sequences using this SpeedMaster follow the BPM.`)
-  lines.push(`  gma.cmd("Store Sequence \\"DP_RATE_MASTER\\"")`)
-  lines.push(`  gma.cmd("Label Sequence \\"DP_RATE_MASTER\\" \\"DP Rate Master\\"")`)
-  lines.push(`  gma.cmd("Assign Sequence \\"DP_RATE_MASTER\\" at Page ${page} Exec ${exec}")`)
-  lines.push(`  -- gma.cmd("Assign SpeedMaster 1 at Page ${page} Exec ${exec}")  -- uncomment if SpeedMaster assignment is preferred`)
+  lines.push(`  Cmd("Store Sequence \\"DP_RATE_MASTER\\"")`)
+  lines.push(`  Cmd("Label Sequence \\"DP_RATE_MASTER\\" \\"DP Rate Master\\"")`)
+  lines.push(`  Cmd("Assign Sequence \\"DP_RATE_MASTER\\" at Page ${page} Exec ${exec}")`)
+  lines.push(`  -- Cmd("Assign SpeedMaster 1 at Page ${page} Exec ${exec}")  -- uncomment if SpeedMaster assignment is preferred`)
   lines.push(``)
   exec++
 
   lines.push(`  -- Effect Size Master (Page ${page}, Exec ${exec})`)
   lines.push(`  -- After running: right-click the executor → set type to "SizeMaster"`)
   lines.push(`  -- so that all effect sequences scale their amplitude with this fader.`)
-  lines.push(`  gma.cmd("Store Sequence \\"DP_FX_MASTER\\"")`)
-  lines.push(`  gma.cmd("Label Sequence \\"DP_FX_MASTER\\" \\"DP Effect Size\\"")`)
-  lines.push(`  gma.cmd("Assign Sequence \\"DP_FX_MASTER\\" at Page ${page} Exec ${exec}")`)
-  lines.push(`  -- gma.cmd("Assign SizeMaster 1 at Page ${page} Exec ${exec}")  -- uncomment if SizeMaster assignment is preferred`)
+  lines.push(`  Cmd("Store Sequence \\"DP_FX_MASTER\\"")`)
+  lines.push(`  Cmd("Label Sequence \\"DP_FX_MASTER\\" \\"DP Effect Size\\"")`)
+  lines.push(`  Cmd("Assign Sequence \\"DP_FX_MASTER\\" at Page ${page} Exec ${exec}")`)
+  lines.push(`  -- Cmd("Assign SizeMaster 1 at Page ${page} Exec ${exec}")  -- uncomment if SizeMaster assignment is preferred`)
   lines.push(``)
   exec++
 
-  lines.push(`  gma.cmd("BlindEdit Off")`)
-  lines.push(`  gma.echo("Disco Pilot: Setup complete! ${exec - startExec} executors created on Page ${page}.")`)
+  lines.push(`  Cmd("BlindEdit Off")`)
+  lines.push(`  Echo("Disco Pilot: Setup complete! ${exec - startExec} executors created on Page ${page}.")`)
   lines.push(`end`)
   lines.push(``)
-  lines.push(`main()`)
+  lines.push(`return main`)
 
   return lines.join('\n')
 }
@@ -318,3 +336,4 @@ function hslToWheelSlot(h, s) {
   if (h < 310) return 6             // Violet
   return 7                          // Magenta/UV
 }
+
