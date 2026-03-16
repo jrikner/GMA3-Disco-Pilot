@@ -34,4 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   profileSave: (opts) => ipcRenderer.invoke('profile:save', opts),
   profileLoad: (opts) => ipcRenderer.invoke('profile:load', opts),
   profileList: () => ipcRenderer.invoke('profile:list'),
+
+  // Network helper (runs in main process to avoid renderer CORS issues)
+  netFetchJson: (opts) => ipcRenderer.invoke('net:fetchJson', opts),
 })
