@@ -15,7 +15,6 @@ export default function PluginGenerator() {
       emphasizeColors: session.emphasizeColors || [],
       page: session.freeExecutorPage,
       startExec: session.freeExecutorStart,
-      selectedPresetRefs: session.selectedPresetRefs || {},
     })
     setLuaCode(code)
     setGenerated(true)
@@ -57,7 +56,6 @@ export default function PluginGenerator() {
           in MA3's offline editor before running at a venue.
           <br /><br />
           Color look sequences use verified MA3 v2.x syntax and should work reliably.
-          For phaser sequences, use the separate <strong style={{ color: '#e0e0e0' }}>Phaser Plugin</strong> (next step).
         </p>
       </div>
 
@@ -65,15 +63,12 @@ export default function PluginGenerator() {
         <div className={styles.label}>What will be created</div>
         <ul style={{ fontSize: 13, color: '#aaa', lineHeight: 2, paddingLeft: 20, marginTop: 12 }}>
           <li>8 color look sequences (one per genre: Techno, EDM, Hip-Hop, Pop, 80s, Latin, Rock, Corporate)</li>
-          <li>2 Pan/Tilt phaser sequences (slow + fast), if you have mover groups</li>
-          <li>1 color chase phaser</li>
-          <li>1 dimmer pulse phaser</li>
           <li>1 BPM Rate Master executor</li>
           <li>1 Effect Size Master executor</li>
         </ul>
         <p style={{ fontSize: 13, color: '#f59e0b', marginTop: 12 }}>
           All sequences will be placed on <strong>Page {session.freeExecutorPage}</strong>,
-          Executors {session.freeExecutorStart}–{(session.freeExecutorStart || 1) + 13}.
+          Executors {session.freeExecutorStart}–{(session.freeExecutorStart || 1) + 9}.
           Nothing outside this range will be touched.
         </p>
       </div>
