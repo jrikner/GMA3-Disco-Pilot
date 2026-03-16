@@ -52,7 +52,7 @@ const emptyGroup = () => ({
   id: Date.now() + Math.random(),
   fixtureType: FIXTURE_TYPES[0],
   maGroupName: '',
-  attributes: getDefaultCapabilities(),
+  attributes: getDefaultAttributes(FIXTURE_TYPES[0]),
 })
 
 export default function FixtureGroupGrid() {
@@ -90,7 +90,7 @@ export default function FixtureGroupGrid() {
 
   const searchProfiles = async (group) => {
     const state = profileUiState[group.id] || {}
-    const query = state.query || group.fixtureType || group.name || group.maGroupName
+    const query = state.query || group.maGroupName || group.fixtureType
 
     updateProfileState(group.id, { loading: true, error: '', results: [] })
     const results = await searchFixtureDefinitions({ query })
@@ -110,6 +110,20 @@ export default function FixtureGroupGrid() {
       results,
       selectedProfileId: results[0].id,
       selectedModeName: results[0].modes?.[0]?.name || '',
+    })
+  }
+
+  const updateFixtureType = (id, fixtureType) => {
+    const defaults = getDefaultAttributes(fixtureType)
+    updateSession({
+      fixtureGroups: groups.map((g) => {
+        if (g.id !== id) return g
+        return {
+          ...g,
+          fixtureType,
+          attributes: g.attributesCustomized ? g.attributes : defaults,
+        }
+      }),
     })
   }
 
@@ -210,20 +224,11 @@ export default function FixtureGroupGrid() {
                 />
               </div>
               <div style={{ flex: 2 }}>
-                <div className={styles.label}>Friendly Name</div>
-                <input
-                  className={styles.input}
-                  placeholder="e.g. Stage movers"
-                  value={group.name}
-                  onChange={e => update(group.id, 'name', e.target.value)}
-                />
-              </div>
-              <div style={{ flex: 2 }}>
                 <div className={styles.label}>Fixture Type</div>
                 <select
                   className={styles.input}
                   value={group.fixtureType}
-                  onChange={e => update(group.id, 'fixtureType', e.target.value)}
+                  onChange={e => updateFixtureType(group.id, e.target.value)}
                   style={{ cursor: 'pointer' }}
                 >
                   {FIXTURE_TYPES.map(t => <option key={t}>{t}</option>)}

@@ -82,24 +82,53 @@ function buildSearchKey(params) {
 function normalizeSearchResults(payload) {
   const list = Array.isArray(payload)
     ? payload
-    : payload?.results || payload?.fixtures || payload?.data || []
+    : Array.isArray(payload?.results)
+      ? payload.results
+      : Array.isArray(payload?.fixtures)
+        ? payload.fixtures
+        : Array.isArray(payload?.data)
+          ? payload.data
+          : null
 
-  return list.map((item, index) => {
-    const manufacturer = item.manufacturer || item.manufacturerName || item.brand || item.manu || 'Unknown'
-    const model = item.model || item.name || item.fixture || item.shortName || `Fixture ${index + 1}`
-    const id = item.id
-      || item.key
-      || [item.manufacturerKey, item.fixtureKey].filter(Boolean).join('/')
-      || `${manufacturer}/${model}`
+  if (list) {
+    return list.map((item, index) => {
+      const manufacturer = item.manufacturer || item.manufacturerName || item.brand || item.manu || 'Unknown'
+      const model = item.model || item.name || item.fixture || item.shortName || `Fixture ${index + 1}`
+      const id = item.id
+        || item.key
+        || [item.manufacturerKey, item.fixtureKey].filter(Boolean).join('/')
+        || `${manufacturer}/${model}`
 
-    return {
-      id,
-      manufacturer,
-      model,
-      modes: item.modes || [],
-      raw: item,
-    }
-  })
+      return {
+        id,
+        manufacturer,
+        model,
+        modes: item.modes || [],
+        raw: item,
+      }
+    })
+  }
+
+  if (payload?.fixtures && typeof payload.fixtures === 'object') {
+    return Object.entries(payload.fixtures).map(([id, fixture], index) => {
+      const [manufacturerKey, fixtureKey] = String(id).split('/')
+      const manufacturer = fixture?.manufacturer
+        || payload?.manufacturers?.[manufacturerKey]?.name
+        || manufacturerKey
+        || 'Unknown'
+      const model = fixture?.name || fixture?.model || fixtureKey || `Fixture ${index + 1}`
+
+      return {
+        id,
+        manufacturer,
+        model,
+        modes: fixture?.modes || [],
+        raw: fixture,
+      }
+    })
+  }
+
+  return []
 }
 
 function filterByFields(items, params) {
