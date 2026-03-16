@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const { Client, Server } = require('node-osc')
 const http = require('http')
+const https = require('https')
 const fs = require('fs')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
@@ -11,6 +12,61 @@ let oscClient = null
 let oscServer = null
 let httpServer = null
 let wsServer = null
+
+function fetchJsonViaNode(url, timeoutMs = 10000, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (!url || typeof url !== 'string') {
+      reject(new Error('A valid URL string is required'))
+      return
+    }
+
+    const parsed = new URL(url)
+    const client = parsed.protocol === 'http:' ? http : https
+
+    const req = client.get(url, {
+      headers: {
+        'Accept': 'application/json,text/plain,*/*',
+        'User-Agent': 'GMA3-Disco-Pilot/1.0 (+https://github.com)',
+      },
+    }, (res) => {
+      const { statusCode = 0, headers } = res
+
+      if ([301, 302, 307, 308].includes(statusCode) && headers.location) {
+        res.resume()
+        if (redirectCount >= 5) {
+          reject(new Error(`Too many redirects while requesting ${url}`))
+          return
+        }
+        const nextUrl = new URL(headers.location, url).toString()
+        fetchJsonViaNode(nextUrl, timeoutMs, redirectCount + 1).then(resolve).catch(reject)
+        return
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        res.resume()
+        reject(new Error(`HTTP ${statusCode} from ${url}`))
+        return
+      }
+
+      const chunks = []
+      res.on('data', (chunk) => chunks.push(chunk))
+      res.on('end', () => {
+        try {
+          const raw = Buffer.concat(chunks).toString('utf8')
+          resolve(JSON.parse(raw))
+        } catch (error) {
+          reject(new Error(`Invalid JSON from ${url}: ${error.message}`))
+        }
+      })
+    })
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Timeout fetching ${url}`))
+    })
+
+    req.on('error', reject)
+  })
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -234,6 +290,17 @@ ipcMain.handle('profile:list', () => {
   if (!fs.existsSync(profilesDir)) return { success: true, profiles: [] }
   const files = fs.readdirSync(profilesDir).filter(f => f.endsWith('.json'))
   return { success: true, profiles: files.map(f => f.replace('.json', '')) }
+})
+
+// ── Remote JSON Fetch (CORS-safe fixture library access) ───────────────────
+
+ipcMain.handle('net:fetchJson', async (_, { url, timeoutMs = 10000 } = {}) => {
+  try {
+    const data = await fetchJsonViaNode(url, timeoutMs)
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
 })
 
 // ── App Lifecycle ────────────────────────────────────────────────────────────

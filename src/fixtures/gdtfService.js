@@ -53,6 +53,15 @@ loadPersistedCache(SEARCH_CACHE_KEY, searchCache)
 loadPersistedCache(PROFILE_CACHE_KEY, detailCache)
 
 async function fetchJson(url, timeoutMs = 8000) {
+  const bridgeFetch = globalThis?.window?.electronAPI?.netFetchJson
+  if (typeof bridgeFetch === 'function') {
+    const result = await bridgeFetch({ url, timeoutMs })
+    if (!result?.success) {
+      throw new Error(result?.error || `Failed to fetch ${url}`)
+    }
+    return result.data
+  }
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
