@@ -13,24 +13,29 @@
  * Structure:
  * {
  *   colorLooks: {
- *     techno:    { page: 2, exec: 1 },
- *     edm:       { page: 2, exec: 2 },
- *     hiphop:    { page: 2, exec: 3 },
- *     pop:       { page: 2, exec: 4 },
- *     eighties:  { page: 2, exec: 5 },
- *     latin:     { page: 2, exec: 6 },
- *     rock:      { page: 2, exec: 7 },
- *     corporate: { page: 2, exec: 8 },
+ *     sequence: { page: 2, exec: 1 },
+ *     cueMap: {
+ *       techno: 1,
+ *       edm: 2,
+ *       hiphop: 3,
+ *       pop: 4,
+ *       eighties: 5,
+ *       latin: 6,
+ *       rock: 7,
+ *       corporate: 8,
+ *     }
  *   },
  *   phasers: {
  *     ptSlow:    { page: 2, exec: 10 },
  *     ptFast:    { page: 2, exec: 11 },
- *     colorChase:{ page: 2, exec: 12 },
- *     dimPulse:  { page: 2, exec: 13 },
+ *     panOnly:   { page: 2, exec: 12 },
+ *     tiltOnly:  { page: 2, exec: 13 },
+ *     colorChase:{ page: 2, exec: 14 },
+ *     dimPulse:  { page: 2, exec: 15 },
  *   },
  *   masters: {
- *     bpmRate:   { page: 2, exec: 20 },
- *     effectSize:{ page: 2, exec: 21 },
+ *     bpmRate:   { page: 2, exec: 16 },
+ *     effectSize:{ page: 2, exec: 17 },
  *   }
  * }
  */
@@ -61,7 +66,14 @@ export function getBoundary(page, exec) {
 }
 
 export function getColorLookExecutor(genre) {
-  return map.colorLooks[genre] || null
+  const sequence = map.colorLooks?.sequence
+  if (!sequence) return null
+  const cue = map.colorLooks?.cueMap?.[genre]
+  return cue ? { ...sequence, cue } : null
+}
+
+export function getColorLookSequence() {
+  return map.colorLooks?.sequence || null
 }
 
 export function getPhaserExecutor(type) {
@@ -80,21 +92,35 @@ export function getMasterExecutor(type) {
  *   { page: number, startExec: number }
  */
 export function buildAddressMapFromWizard(wizardConfig) {
-  const { page, startExec } = wizardConfig
+  const { page, startExec, phaserConfig = {} } = wizardConfig
   let exec = startExec
 
   const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
-  const colorLooks = {}
-  for (const genre of genres) {
-    colorLooks[genre] = { page, exec: exec++ }
+  const cueMap = {}
+  genres.forEach((genre, index) => {
+    cueMap[genre] = index + 1
+  })
+  const colorLooks = {
+    sequence: { page, exec: exec++ },
+    cueMap,
   }
 
+  const {
+    includePtFast = true,
+    includePanOnly = true,
+    includeTiltOnly = true,
+  } = phaserConfig
+
   const phasers = {
-    ptSlow:     { page, exec: exec++ },
-    ptFast:     { page, exec: exec++ },
-    colorChase: { page, exec: exec++ },
-    dimPulse:   { page, exec: exec++ },
+    ptSlow: { page, exec: exec++ },
   }
+
+  if (includePtFast) phasers.ptFast = { page, exec: exec++ }
+  if (includePanOnly) phasers.panOnly = { page, exec: exec++ }
+  if (includeTiltOnly) phasers.tiltOnly = { page, exec: exec++ }
+
+  phasers.colorChase = { page, exec: exec++ }
+  phasers.dimPulse = { page, exec: exec++ }
 
   const masters = {
     bpmRate:    { page, exec: exec++ },
@@ -107,8 +133,12 @@ export function buildAddressMapFromWizard(wizardConfig) {
 
 export function getAllExecutors() {
   const all = []
-  for (const [genre, loc] of Object.entries(map.colorLooks)) {
-    all.push({ key: `color_${genre}`, label: `Color: ${genre}`, ...loc })
+  if (map.colorLooks?.sequence) {
+    all.push({
+      key: 'color_sequence',
+      label: 'Color Looks Sequence',
+      ...map.colorLooks.sequence,
+    })
   }
   for (const [type, loc] of Object.entries(map.phasers)) {
     all.push({ key: `phaser_${type}`, label: `Phaser: ${type}`, ...loc })

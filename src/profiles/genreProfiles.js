@@ -11,7 +11,7 @@
  *   effectSize      - 0 = subtle, 1 = maximum amplitude effect
  *   strobeEnabled   - whether strobe is allowed for this genre
  *   strobeIntensity - strobe intensity (0–1), only used if strobeEnabled
- *   phasers         - which phasers to activate: ptSlow, ptFast, colorChase, dimPulse
+ *   phasers         - which phasers to activate: ptSlow, ptFast, panOnly, tiltOnly, colorChase, dimPulse
  *   bpmTracking     - whether to follow detected BPM for rate master
  *   transitionTime  - seconds for crossfade when switching TO this genre
  *

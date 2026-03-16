@@ -200,7 +200,9 @@ ipcMain.handle('file:save', async (_, { defaultName, content, fileType }) => {
   const { dialog } = require('electron')
   const filters = fileType === 'csv'
     ? [{ name: 'CSV', extensions: ['csv'] }]
-    : [{ name: 'LUA Script', extensions: ['lua'] }]
+    : fileType === 'xml'
+      ? [{ name: 'XML File', extensions: ['xml'] }]
+      : [{ name: 'LUA Script', extensions: ['lua'] }]
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: defaultName,
     filters,

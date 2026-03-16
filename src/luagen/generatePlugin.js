@@ -8,7 +8,7 @@
  *
  * What is created:
  *   - 8 color look sequences (one per genre), assigned to the declared free executors
- *   - 4 phaser sequences (ptSlow, ptFast, colorChase, dimPulse), for groups with P/T and RGB
+ *   - phaser sequences (ptSlow, optional ptFast/panOnly/tiltOnly, colorChase, dimPulse)
  *   - 1 BPM Rate Master executor
  *   - 1 Effect Size Master executor
  *
@@ -29,7 +29,7 @@ import { buildCueFriendlyPalette } from '../profiles/paletteAdapter.js'
  * @returns {string} LUA script content
  */
 export function generatePlugin(config) {
-  const { fixtureGroups, avoidColors, emphasizeColors, page, startExec } = config
+  const { fixtureGroups, avoidColors, emphasizeColors, page, startExec, phaserConfig = {} } = config
 
   const lines = []
   const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
@@ -47,51 +47,55 @@ export function generatePlugin(config) {
 
   // ── Color Look Sequences ────────────────────────────────────────────────────
   lines.push(`  -- ╔══════════════════════════════════════╗`)
-  lines.push(`  -- ║  Color Look Sequences (1 per genre)  ║`)
+  lines.push(`  -- ║  Color Look Sequence (cue-per-genre)  ║`)
   lines.push(`  -- ╚══════════════════════════════════════╝`)
   lines.push(``)
 
-  for (const genreId of genres) {
+  const colorLookSequenceName = "DP_COLOR_LOOKS"
+  const colorLookSequenceNameEscaped = escapeLuaString(colorLookSequenceName)
+
+  lines.push(`  -- Shared color sequence (Page ${page}, Exec ${exec})`)
+  lines.push(`  gma.cmd("Store Sequence \\"${colorLookSequenceNameEscaped}\\"")`)
+  lines.push(`  gma.cmd("Label Sequence \\"${colorLookSequenceNameEscaped}\\" \\"DP Color Looks\\"")`)
+  lines.push(``)
+
+  for (const [genreIndex, genreId] of genres.entries()) {
     const profile = GENRE_PROFILES[genreId]
-    const seqName = `DP_${genreId.toUpperCase()}`
-    const colors = selectColors(genreId, avoidColors, emphasizeColors)
+    const colors = selectColors(profile.colorPalette.colors, avoidColors, emphasizeColors)
+    const cueNum = genreIndex + 1
 
-    lines.push(`  -- ${profile.label} (Page ${page}, Exec ${exec})`)
-    lines.push(`  gma.cmd("Store Sequence \\"${seqName}\\"")`)
-    lines.push(`  gma.cmd("Label Sequence \\"${seqName}\\" \\"${profile.label}\\"")`)
+    lines.push(`  -- Cue ${cueNum}: ${profile.label}`)
+    lines.push(`  gma.cmd("ClearAll")`)
 
-    // Create one cue per color, plus a home cue
-    colors.forEach((color, i) => {
-      const { h, s, l } = color
-      const cueNum = i + 1
-      lines.push(`  gma.cmd("ClearAll")`)
-      // Select all relevant groups for this look
-      for (const group of fixtureGroups) {
-        lines.push(`  gma.cmd("SelFix Group \\"${group.maGroupName}\\"")`)
-      }
-      if (fixtureGroups.some(g => g.attributes.rgb)) {
-        // RGB fixtures: set HSB color
-        lines.push(`  gma.cmd("Attribute \\"Hue\\" at ${h}")`)
-        lines.push(`  gma.cmd("Attribute \\"Saturation\\" at ${s}")`)
-        lines.push(`  gma.cmd("Attribute \\"Dimmer\\" at 100")`)
-      }
-      if (fixtureGroups.some(g => g.attributes.colorWheel)) {
-        // Color wheel: find closest slot (simplified — uses first slot index)
-        const wheelSlot = hslToWheelSlot(h, s)
-        lines.push(`  gma.cmd("Attribute \\"Color1\\" at ${wheelSlot}")`)
-      }
-      lines.push(`  gma.cmd("Store Sequence \\"${seqName}\\" Cue ${cueNum} Merge")`)
-      lines.push(`  gma.cmd("Label Cue ${cueNum} Sequence \\"${seqName}\\" \\"${color.label || `Color ${cueNum}`}\\"")`)
-      lines.push(`  gma.cmd("Cue ${cueNum} Sequence \\"${seqName}\\" property \\"FadeTime\\" 2")`)
-      lines.push(``)
-    })
+    // Select all relevant groups for this look
+    for (const group of fixtureGroups) {
+      lines.push(`  gma.cmd("SelFix Group \\"${escapeLuaString(group.maGroupName)}\\"")`)
+    }
 
-    // Set playback mode to Master Fader
-    lines.push(`  gma.cmd("Assign Sequence \\"${seqName}\\" at Page ${page} Exec ${exec}")`)
-    lines.push(`  gma.cmd("Assign Sequence \\"${seqName}\\" fadermaster")`)
+    if (fixtureGroups.some(g => g.attributes.rgb)) {
+      // Blend genre palette into a single representative color
+      const blended = blendColors(colors)
+      lines.push(`  gma.cmd("Attribute \\"Hue\\" at ${blended.h}")`)
+      lines.push(`  gma.cmd("Attribute \\"Saturation\\" at ${blended.s}")`)
+      lines.push(`  gma.cmd("Attribute \\"Dimmer\\" at 100")`)
+    }
+
+    if (fixtureGroups.some(g => g.attributes.colorWheel)) {
+      const blended = blendColors(colors)
+      const wheelSlot = hslToWheelSlot(blended.h, blended.s)
+      lines.push(`  gma.cmd("Attribute \\"Color1\\" at ${wheelSlot}")`)
+    }
+
+    lines.push(`  gma.cmd("Store Sequence \\"${colorLookSequenceNameEscaped}\\" Cue ${cueNum} Merge")`)
+    lines.push(`  gma.cmd("Label Cue ${cueNum} Sequence \\"${colorLookSequenceNameEscaped}\\" \\"${escapeLuaString(profile.label)}\\"")`)
+    lines.push(`  gma.cmd("Cue ${cueNum} Sequence \\"${colorLookSequenceNameEscaped}\\" property \\"FadeTime\\" 2")`)
     lines.push(``)
-    exec++
   }
+
+  lines.push(`  gma.cmd("Assign Sequence \\"${colorLookSequenceNameEscaped}\\" at Page ${page} Exec ${exec}")`)
+  lines.push(`  gma.cmd("Assign Sequence \\"${colorLookSequenceNameEscaped}\\" fadermaster")`)
+  lines.push(``)
+  exec++
 
   // ── Phaser Sequences ────────────────────────────────────────────────────────
   lines.push(`  -- ╔══════════════════════════════╗`)
@@ -103,38 +107,69 @@ export function generatePlugin(config) {
   const rgbGroups = fixtureGroups.filter(g => g.attributes.rgb || g.attributes.colorWheel)
   const dimGroups = fixtureGroups
 
-  // Pan/Tilt Slow phaser
+  const {
+    includePtFast = true,
+    includePanOnly = true,
+    includeTiltOnly = true,
+  } = phaserConfig
+
+  // Pan/Tilt movement phasers
   if (moverGroups.length > 0) {
     lines.push(`  -- P/T Slow Phaser (Page ${page}, Exec ${exec})`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_SLOW\\"")`)
-    lines.push(`  gma.cmd("Label Sequence \\"DP_PHASER_PT_SLOW\\" \\"DP Phaser PT Slow\\"")`)
+    lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_SLOW\"")`)
+    lines.push(`  gma.cmd("Label Sequence \"DP_PHASER_PT_SLOW\" \"DP Phaser PT Slow\"")`)
     for (const group of moverGroups) {
-      lines.push(`  gma.cmd("SelFix Group \\"${group.maGroupName}\\"")`)
+      lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
     }
-    lines.push(`  gma.cmd("Attribute \\"Pan\\" Effect Sinus Width 30 Rate 0.3")`)
-    lines.push(`  gma.cmd("Attribute \\"Tilt\\" Effect Sinus Width 25 Rate 0.3 Phase 90")`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_SLOW\\" Cue 1 Merge")`)
-    lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_PT_SLOW\\" at Page ${page} Exec ${exec}")`)
+    lines.push(`  gma.cmd("Attribute \"Pan\" Effect Sinus Width 30 Rate 0.3")`)
+    lines.push(`  gma.cmd("Attribute \"Tilt\" Effect Sinus Width 25 Rate 0.3 Phase 90")`)
+    lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_SLOW\" Cue 1 Merge")`)
+    lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PT_SLOW\" at Page ${page} Exec ${exec}")`)
     lines.push(``)
     exec++
 
-    // Pan/Tilt Fast phaser
-    lines.push(`  -- P/T Fast Phaser (Page ${page}, Exec ${exec})`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_FAST\\"")`)
-    lines.push(`  gma.cmd("Label Sequence \\"DP_PHASER_PT_FAST\\" \\"DP Phaser PT Fast\\"")`)
-    for (const group of moverGroups) {
-      lines.push(`  gma.cmd("SelFix Group \\"${group.maGroupName}\\"")`)
+    if (includePtFast) {
+      lines.push(`  -- P/T Fast Phaser (Page ${page}, Exec ${exec})`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_FAST\"")`)
+      lines.push(`  gma.cmd("Label Sequence \"DP_PHASER_PT_FAST\" \"DP Phaser PT Fast\"")`)
+      for (const group of moverGroups) {
+        lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+      }
+      lines.push(`  gma.cmd("Attribute \"Pan\" Effect Sinus Width 45 Rate 1.2")`)
+      lines.push(`  gma.cmd("Attribute \"Tilt\" Effect Sinus Width 35 Rate 1.2 Phase 90")`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT_FAST\" Cue 1 Merge")`)
+      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PT_FAST\" at Page ${page} Exec ${exec}")`)
+      lines.push(``)
+      exec++
     }
-    lines.push(`  gma.cmd("Attribute \\"Pan\\" Effect Sinus Width 45 Rate 1.2")`)
-    lines.push(`  gma.cmd("Attribute \\"Tilt\\" Effect Sinus Width 35 Rate 1.2 Phase 90")`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_FAST\\" Cue 1 Merge")`)
-    lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_PT_FAST\\" at Page ${page} Exec ${exec}")`)
-    lines.push(``)
-    exec++
+
+    if (includePanOnly) {
+      lines.push(`  -- Pan-only Phaser (Page ${page}, Exec ${exec})`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PAN_ONLY\"")`)
+      for (const group of moverGroups) {
+        lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+      }
+      lines.push(`  gma.cmd("Attribute \"Pan\" Effect Sinus Width 45 Rate 1")`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PAN_ONLY\" Cue 1 Merge")`)
+      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PAN_ONLY\" at Page ${page} Exec ${exec}")`)
+      lines.push(``)
+      exec++
+    }
+
+    if (includeTiltOnly) {
+      lines.push(`  -- Tilt-only Phaser (Page ${page}, Exec ${exec})`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_TILT_ONLY\"")`)
+      for (const group of moverGroups) {
+        lines.push(`  gma.cmd("SelFix Group \"${group.maGroupName}\"")`)
+      }
+      lines.push(`  gma.cmd("Attribute \"Tilt\" Effect Sinus Width 35 Rate 1")`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_TILT_ONLY\" Cue 1 Merge")`)
+      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_TILT_ONLY\" at Page ${page} Exec ${exec}")`)
+      lines.push(``)
+      exec++
+    }
   } else {
-    // No movers: skip P/T phaser slots but still increment exec to keep map consistent
-    lines.push(`  -- Skipping P/T phasers (no Pan/Tilt groups defined)`)
-    exec += 2
+    lines.push(`  -- Skipping mover phasers (no Pan/Tilt groups defined)`)
   }
 
   // Color Chase phaser
@@ -210,15 +245,63 @@ function lua(strings, ...values) {
   return strings.reduce((acc, str, i) => acc + str + (values[i] ?? ''), '')
 }
 
+function escapeLuaString(value) {
+  return String(value)
+    .replaceAll('\\', '\\\\\\\\')
+    .replaceAll('"', '\\\\\\"')
+}
+
 /**
  * Build a cue-friendly palette from the genre profile and user constraints.
  */
-function selectColors(genreId, avoidColors, emphasizeColors) {
-  return buildCueFriendlyPalette(genreId, {
-    avoidColors,
-    emphasizeColors,
-    maxColors: 6,
-  })
+function selectColors(palette, avoidColors, emphasizeColors) {
+  const filtered = palette.filter(c =>
+    !avoidColors.some(a => hueDist(c.h, a.h) < 30)
+  )
+
+  const emphasized = emphasizeColors.filter(e =>
+    !avoidColors.some(a => hueDist(e.h, a.h) < 30)
+  )
+
+  const merged = [...emphasized, ...filtered]
+
+  // Ensure at least 1 color
+  if (merged.length === 0) {
+    return [{ h: 200, s: 30, l: 60, label: 'Neutral' }]
+  }
+
+  // Cap at 6 colors
+  return merged.slice(0, 6)
+}
+
+function blendColors(colors) {
+  if (!colors || colors.length === 0) return { h: 200, s: 30, l: 60 }
+
+  let x = 0
+  let y = 0
+  let sat = 0
+  let light = 0
+
+  for (const color of colors) {
+    const rad = (color.h * Math.PI) / 180
+    x += Math.cos(rad)
+    y += Math.sin(rad)
+    sat += color.s
+    light += color.l
+  }
+
+  const h = (Math.atan2(y, x) * 180) / Math.PI
+  const normalizedHue = (h + 360) % 360
+  return {
+    h: Math.round(normalizedHue),
+    s: Math.round(sat / colors.length),
+    l: Math.round(light / colors.length),
+  }
+}
+
+function hueDist(a, b) {
+  const d = Math.abs(a - b) % 360
+  return d > 180 ? 360 - d : d
 }
 
 /**
