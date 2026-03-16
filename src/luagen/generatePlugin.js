@@ -4,11 +4,9 @@
 
 import { GENRE_PROFILES } from '../profiles/genreProfiles.js'
 import {
-  applyPreset,
   assignSequence,
   assignSequenceOption,
   attributeAt,
-  attributeEffect,
   clearAll,
   cmd,
   cueProperty,
@@ -25,7 +23,6 @@ export function generatePlugin(config) {
     emphasizeColors,
     page,
     startExec,
-    selectedPresetRefs = {},
   } = config
 
   const lines = []
@@ -82,82 +79,6 @@ export function generatePlugin(config) {
     lines.push(``)
     exec++
   }
-
-  lines.push(`  -- ╔══════════════════════════════╗`)
-  lines.push(`  -- ║  Phaser Sequences             ║`)
-  lines.push(`  -- ╚══════════════════════════════╝`)
-  lines.push(``)
-
-  const moverGroups = fixtureGroups.filter(g => g.attributes.pt)
-  const rgbGroups = fixtureGroups.filter(g => g.attributes.rgb || g.attributes.colorWheel)
-  const dimGroups = fixtureGroups
-
-  if (moverGroups.length > 0) {
-    lines.push(`  -- P/T Slow Phaser (Page ${page}, Exec ${exec})`)
-    lines.push(storeSequence('DP_PHASER_PT_SLOW'))
-    lines.push(labelSequence('DP_PHASER_PT_SLOW', 'DP Phaser PT Slow'))
-    for (const group of moverGroups) lines.push(selectGroup(group.maGroupName))
-    if (selectedPresetRefs.ptSlow) {
-      lines.push(`  -- Apply showfile preset before effect recipe`) 
-      lines.push(applyPreset(selectedPresetRefs.ptSlow))
-    }
-    lines.push(attributeEffect('Pan', 'Sinus Width 30 Rate 0.3'))
-    lines.push(attributeEffect('Tilt', 'Sinus Width 25 Rate 0.3 Phase 90'))
-    lines.push(storeSequence('DP_PHASER_PT_SLOW', 1, 'Merge'))
-    lines.push(assignSequence('DP_PHASER_PT_SLOW', `Page ${page} Exec ${exec}`))
-    lines.push(``)
-    exec++
-
-    lines.push(`  -- P/T Fast Phaser (Page ${page}, Exec ${exec})`)
-    lines.push(storeSequence('DP_PHASER_PT_FAST'))
-    lines.push(labelSequence('DP_PHASER_PT_FAST', 'DP Phaser PT Fast'))
-    for (const group of moverGroups) lines.push(selectGroup(group.maGroupName))
-    if (selectedPresetRefs.ptFast) {
-      lines.push(`  -- Apply showfile preset before effect recipe`)
-      lines.push(applyPreset(selectedPresetRefs.ptFast))
-    }
-    lines.push(attributeEffect('Pan', 'Sinus Width 45 Rate 1.2'))
-    lines.push(attributeEffect('Tilt', 'Sinus Width 35 Rate 1.2 Phase 90'))
-    lines.push(storeSequence('DP_PHASER_PT_FAST', 1, 'Merge'))
-    lines.push(assignSequence('DP_PHASER_PT_FAST', `Page ${page} Exec ${exec}`))
-    lines.push(``)
-    exec++
-  } else {
-    lines.push(`  -- Skipping P/T phasers (no Pan/Tilt groups defined)`)
-    exec += 2
-  }
-
-  if (rgbGroups.length > 0) {
-    lines.push(`  -- Color Chase (Page ${page}, Exec ${exec})`)
-    lines.push(storeSequence('DP_PHASER_COLOR'))
-    lines.push(labelSequence('DP_PHASER_COLOR', 'DP Color Chase'))
-    for (const group of rgbGroups) lines.push(selectGroup(group.maGroupName))
-    if (selectedPresetRefs.colorChase) {
-      lines.push(`  -- Apply showfile preset before effect recipe`)
-      lines.push(applyPreset(selectedPresetRefs.colorChase))
-    }
-    lines.push(attributeEffect('Hue', 'Sinus Width 180 Rate 0.5'))
-    lines.push(storeSequence('DP_PHASER_COLOR', 1, 'Merge'))
-    lines.push(assignSequence('DP_PHASER_COLOR', `Page ${page} Exec ${exec}`))
-    lines.push(``)
-    exec++
-  } else {
-    exec++
-  }
-
-  lines.push(`  -- Dimmer Pulse (Page ${page}, Exec ${exec})`)
-  lines.push(storeSequence('DP_PHASER_DIM'))
-  lines.push(labelSequence('DP_PHASER_DIM', 'DP Dimmer Pulse'))
-  for (const group of dimGroups) lines.push(selectGroup(group.maGroupName))
-  if (selectedPresetRefs.dimPulse) {
-    lines.push(`  -- Apply showfile preset before effect recipe`)
-    lines.push(applyPreset(selectedPresetRefs.dimPulse))
-  }
-  lines.push(attributeEffect('Dimmer', 'Square Width 50 Rate 1'))
-  lines.push(storeSequence('DP_PHASER_DIM', 1, 'Merge'))
-  lines.push(assignSequence('DP_PHASER_DIM', `Page ${page} Exec ${exec}`))
-  lines.push(``)
-  exec++
 
   lines.push(`  -- ╔══════════════╗`)
   lines.push(`  -- ║  Masters     ║`)
