@@ -19,6 +19,7 @@ const BEAT_HISTORY_MAX = 60         // Keep last N beat intervals
 const MIN_BPM = 60
 const MAX_BPM = 200
 const SILENCE_THRESHOLD = 0.005     // RMS below this = silence
+const BPM_RESYNC_WINDOW_MS = 10000
 
 let analyzer = null
 let onsetHistory = []               // timestamps of detected onsets
@@ -78,6 +79,7 @@ function handleFrame(features) {
   if (!isSilent && rms > smoothedEnergy * 1.4 && (now - lastOnsetTime) > 200) {
     lastOnsetTime = now
     onsetHistory.push(now)
+    onsetHistory = onsetHistory.filter(ts => (now - ts) <= BPM_RESYNC_WINDOW_MS)
     if (onsetHistory.length > BEAT_HISTORY_MAX) {
       onsetHistory.shift()
     }
