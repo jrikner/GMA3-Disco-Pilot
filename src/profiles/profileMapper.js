@@ -46,6 +46,8 @@ const MIX_STEPS = [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]
 // Callbacks
 let dropCallback = null   // () => void — called when a drop is detected
 let historyCallback = null  // ({ ts, genre, bpm, confidence }) => void
+let lastBpmSyncAt = 0
+const BPM_RESYNC_MS = 10000
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -123,11 +125,13 @@ export function onAudioFrame({ bpm, energy, isSilent }) {
   detectDrop(energy)
 
   const effectiveBpm = manualBpm ?? bpm
+  const now = Date.now()
 
   // Update rate master (only if BPM changes significantly)
-  if (Math.abs(effectiveBpm - lastBpm) > 2) {
+  if (Math.abs(effectiveBpm - lastBpm) > 2 || (now - lastBpmSyncAt) >= BPM_RESYNC_MS) {
     lastBpm = effectiveBpm
     updateBpmMaster(effectiveBpm)
+    lastBpmSyncAt = now
   }
 
   // Update effect size master (energy-driven, smooth)

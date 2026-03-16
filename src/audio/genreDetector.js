@@ -18,6 +18,7 @@
 const MAEST_CONTEXT_SECONDS = 30
 const ANALYSIS_INTERVAL_MS = 5000
 const CONFIDENCE_THRESHOLD = 0.55
+const GENRE_MARGIN_THRESHOLD = 0.08
 const HYSTERESIS_WINDOWS = 2
 const INPUT_SAMPLE_RATE = 44100
 const MODEL_SAMPLE_RATE = 16000
@@ -25,40 +26,120 @@ const MODEL_SAMPLE_RATE = 16000
 // ── Genre label mapping ──────────────────────────────────────────────────────
 // Maps Essentia/Discogs style tags → our internal genre IDs
 
-const GENRE_MAPPINGS = {
-  techno: [
-    'techno', 'tech-house', 'industrial', 'ebm', 'hardtechno',
-    'minimal', 'detroit techno', 'acid techno',
-  ],
-  edm: [
-    'electronic', 'edm', 'house', 'trance', 'electro', 'dubstep',
-    'drum and bass', 'drum n bass', 'dnb', 'jungle', 'garage',
-    'bass music', 'future bass', 'trap', 'big room', 'progressive house',
-  ],
-  hiphop: [
-    'hip hop', 'hip-hop', 'rap', 'r&b', 'rnb', 'soul', 'funk',
-    'neo-soul', 'trip hop', 'boom bap', 'gangsta rap', 'afrobeat',
-  ],
-  pop: [
-    'pop', 'dance-pop', 'synthpop', 'electropop', 'indie pop',
-    'k-pop', 'teen pop', 'dream pop',
-  ],
-  eighties: [
-    '80s', '1980s', 'new wave', 'post-punk', 'synth', 'italo disco',
-    'disco', 'hi-nrg', 'eurodisco',
-  ],
-  latin: [
-    'latin', 'reggaeton', 'salsa', 'merengue', 'cumbia', 'bachata',
-    'afrobeats', 'afro-house', 'tropical', 'soca', 'dancehall', 'reggae',
-  ],
-  rock: [
-    'rock', 'alternative', 'indie rock', 'punk', 'metal', 'hard rock',
-    'classic rock', 'grunge', 'emo',
-  ],
-  corporate: [
-    'ambient', 'classical', 'jazz', 'acoustic', 'easy listening',
-    'lounge', 'chillout', 'new age', 'instrumental',
-  ],
+const ALL_GENRES = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
+
+// Curated Discogs/MAEST style labels mapped by normalized exact key.
+const DISCOS_LABEL_TO_GENRE = {
+  // Techno
+  techno: 'techno',
+  'detroit techno': 'techno',
+  'acid techno': 'techno',
+  'hard techno': 'techno',
+  hardtechno: 'techno',
+  'minimal techno': 'techno',
+  'tech house': 'techno',
+  industrial: 'techno',
+  ebm: 'techno',
+  // EDM
+  house: 'edm',
+  'deep house': 'edm',
+  'progressive house': 'edm',
+  electro: 'edm',
+  trance: 'edm',
+  'hard trance': 'edm',
+  dubstep: 'edm',
+  'drum and bass': 'edm',
+  'drum n bass': 'edm',
+  dnb: 'edm',
+  jungle: 'edm',
+  garage: 'edm',
+  edm: 'edm',
+  electronic: 'edm',
+  // Hip-hop
+  'hip hop': 'hiphop',
+  rap: 'hiphop',
+  rnb: 'hiphop',
+  'r and b': 'hiphop',
+  soul: 'hiphop',
+  funk: 'hiphop',
+  'trip hop': 'hiphop',
+  'boom bap': 'hiphop',
+  'gangsta rap': 'hiphop',
+  // Pop
+  pop: 'pop',
+  dancepop: 'pop',
+  synthpop: 'pop',
+  electropop: 'pop',
+  'indie pop': 'pop',
+  kpop: 'pop',
+  'teen pop': 'pop',
+  'dream pop': 'pop',
+  // 80s
+  '80s': 'eighties',
+  '1980s': 'eighties',
+  'new wave': 'eighties',
+  postpunk: 'eighties',
+  synthwave: 'eighties',
+  'italo disco': 'eighties',
+  disco: 'eighties',
+  hinrg: 'eighties',
+  eurodisco: 'eighties',
+  // Latin / Afro
+  latin: 'latin',
+  reggaeton: 'latin',
+  salsa: 'latin',
+  merengue: 'latin',
+  cumbia: 'latin',
+  bachata: 'latin',
+  afrobeats: 'latin',
+  afrobeat: 'latin',
+  'afro house': 'latin',
+  tropical: 'latin',
+  soca: 'latin',
+  dancehall: 'latin',
+  reggae: 'latin',
+  // Rock
+  rock: 'rock',
+  alternative: 'rock',
+  'indie rock': 'rock',
+  punk: 'rock',
+  metal: 'rock',
+  'hard rock': 'rock',
+  'classic rock': 'rock',
+  grunge: 'rock',
+  emo: 'rock',
+  // Corporate / background
+  ambient: 'corporate',
+  classical: 'corporate',
+  jazz: 'corporate',
+  acoustic: 'corporate',
+  'easy listening': 'corporate',
+  lounge: 'corporate',
+  chillout: 'corporate',
+  'new age': 'corporate',
+  instrumental: 'corporate',
+}
+
+const GENRE_PRIORS = {
+  techno: 1.0,
+  edm: 0.96,
+  hiphop: 1.0,
+  pop: 1.0,
+  eighties: 1.0,
+  latin: 1.0,
+  rock: 1.0,
+  corporate: 0.95,
+}
+
+const GENRE_NORMALIZATION = {
+  techno: 1.0,
+  edm: 1.25,
+  hiphop: 1.0,
+  pop: 1.05,
+  eighties: 0.95,
+  latin: 1.0,
+  rock: 1.0,
+  corporate: 0.95,
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -141,7 +222,8 @@ async function runAnalysis() {
     scores = spectralHeuristic(windowSamples)
   }
 
-  const genre = selectGenre(scores)
+  const selection = selectGenre(scores)
+  const { genre } = selection
 
   // Hysteresis: require HYSTERESIS_WINDOWS consecutive windows of same genre
   if (genre === candidateGenre) {
@@ -149,7 +231,15 @@ async function runAnalysis() {
     if (candidateCount >= HYSTERESIS_WINDOWS) {
       if (genre !== currentGenre) {
         currentGenre = genre
-        callback?.({ genre, scores, confidence: scores[genre] || 0 })
+        callback?.({
+          genre,
+          confidence: selection.rawConfidence,
+          rawConfidence: selection.rawConfidence,
+          weightedConfidence: selection.weightedConfidence,
+          scores: selection.rawScores,
+          weightedScores: selection.weightedScores,
+          topGenres: selection.topGenres,
+        })
       }
     }
   } else {
@@ -159,28 +249,47 @@ async function runAnalysis() {
 }
 
 function selectGenre(scores) {
-  // Apply context weights
-  const weighted = {}
-  for (const [genre, score] of Object.entries(scores)) {
-    weighted[genre] = score * (contextWeights[genre] || 1.0)
+  const rawScores = normalizeScoreMap(scores)
+  const weightedScores = {}
+
+  for (const genre of ALL_GENRES) {
+    const contextWeight = contextWeights[genre] || 1.0
+    weightedScores[genre] = rawScores[genre] * contextWeight
   }
 
-  // Find highest scoring genre
-  let best = null
-  let bestScore = 0
-  for (const [genre, score] of Object.entries(weighted)) {
-    if (score > bestScore) {
-      bestScore = score
-      best = genre
-    }
+  const rawSorted = Object.entries(rawScores).sort((a, b) => b[1] - a[1])
+  const weightedSorted = Object.entries(weightedScores).sort((a, b) => b[1] - a[1])
+
+  const [rawTopGenre = 'unknown', rawTopScore = 0] = rawSorted[0] || []
+  const rawSecondScore = rawSorted[1]?.[1] || 0
+  const rawDelta = rawTopScore - rawSecondScore
+
+  const weightedTopGenre = weightedSorted[0]?.[0] || rawTopGenre
+  const weightedTopScore = weightedSorted[0]?.[1] || rawTopScore
+
+  let selectedGenre = rawTopGenre || 'unknown'
+  if (rawTopScore < CONFIDENCE_THRESHOLD || rawDelta < GENRE_MARGIN_THRESHOLD) {
+    selectedGenre = currentGenre !== 'unknown' ? currentGenre : 'unknown'
+  } else if (weightedTopGenre !== rawTopGenre) {
+    const weightedAltRaw = rawScores[weightedTopGenre] || 0
+    const closeRaw = Math.abs(rawTopScore - weightedAltRaw) <= GENRE_MARGIN_THRESHOLD
+    if (closeRaw) selectedGenre = weightedTopGenre
   }
 
-  // If confidence too low and we have context, stay on current
-  if (bestScore < CONFIDENCE_THRESHOLD && currentGenre !== 'unknown') {
-    return currentGenre
-  }
+  const topGenres = rawSorted.slice(0, 5).map(([genre, raw]) => ({
+    genre,
+    raw,
+    weighted: weightedScores[genre] || 0,
+  }))
 
-  return best || 'unknown'
+  return {
+    genre: selectedGenre,
+    rawConfidence: rawScores[selectedGenre] || 0,
+    weightedConfidence: weightedScores[selectedGenre] || 0,
+    rawScores,
+    weightedScores,
+    topGenres,
+  }
 }
 
 // ── Essentia.js Model (loads asynchronously) ──────────────────────────────────
@@ -231,26 +340,41 @@ async function runEssentiaModel(samples) {
 
 function mapEssentiaToGenres(predictions) {
   // predictions is an array of [label, score] pairs from Discogs MAEST
-  const scores = {
-    techno: 0, edm: 0, hiphop: 0, pop: 0,
-    eighties: 0, latin: 0, rock: 0, corporate: 0,
-  }
+  const scores = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 0]))
+  const hitCounts = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 0]))
 
   for (const [label, score] of predictions) {
-    const lower = label.toLowerCase()
-    for (const [genreId, keywords] of Object.entries(GENRE_MAPPINGS)) {
-      if (keywords.some(k => lower.includes(k))) {
-        scores[genreId] += score
-      }
-    }
+    const mappedGenre = DISCOS_LABEL_TO_GENRE[normalizeLabel(label)]
+    if (!mappedGenre) continue
+    scores[mappedGenre] += score
+    hitCounts[mappedGenre] += 1
   }
 
-  // Normalize
-  const total = Object.values(scores).reduce((a, b) => a + b, 0) || 1
-  for (const key of Object.keys(scores)) {
-    scores[key] /= total
+  for (const genre of ALL_GENRES) {
+    const hits = Math.max(1, hitCounts[genre])
+    const prior = GENRE_PRIORS[genre] ?? 1.0
+    const norm = GENRE_NORMALIZATION[genre] ?? 1.0
+    scores[genre] = (scores[genre] * prior) / (hits * norm)
   }
-  return scores
+
+  return normalizeScoreMap(scores)
+}
+
+function normalizeLabel(label) {
+  return String(label || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function normalizeScoreMap(scoreMap) {
+  const normalized = Object.fromEntries(ALL_GENRES.map((genre) => [genre, scoreMap[genre] || 0]))
+  const total = Object.values(normalized).reduce((sum, score) => sum + score, 0) || 1
+  for (const genre of Object.keys(normalized)) {
+    normalized[genre] /= total
+  }
+  return normalized
 }
 
 function normalizeMonoSamples(samples) {

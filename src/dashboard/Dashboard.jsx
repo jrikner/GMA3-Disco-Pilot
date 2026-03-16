@@ -114,17 +114,14 @@ export default function Dashboard() {
 
       const genreProcessor = startGenreDetector(audioContext, (result) => {
         if (overrides.holdFreeze) return
-        const topGenres = Object.entries(result.scores || {})
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 3)
-          .map(([genre, score]) => ({ genre, score }))
+        const topGenres = (result.topGenres || []).slice(0, 3)
 
         updateLive({
           genre: result.genre,
-          genreConfidence: result.confidence,
+          genreConfidence: result.rawConfidence ?? result.confidence,
           topGenres,
         })
-        profileMapper.onGenreChange(result.genre, result.confidence)
+        profileMapper.onGenreChange(result.genre, result.rawConfidence ?? result.confidence)
       })
 
       if (genreProcessor) {
@@ -379,7 +376,7 @@ export default function Dashboard() {
             : 'Analyzing…'}
         </div>
 
-        {(live.topGenres || []).slice(0, 3).map(({ genre, score }) => (
+        {(live.topGenres || []).slice(0, 3).map(({ genre, raw, weighted }) => (
           <div key={genre} className={styles.genreCandidateRow}>
             <span>{getProfile(genre).label}</span>
             <div style={{ flex: 1, margin: '0 12px' }}>
@@ -387,14 +384,14 @@ export default function Dashboard() {
                 <div
                   className={styles.genreBarFill}
                   style={{
-                    width: `${score * 100}%`,
+                    width: `${(raw || 0) * 100}%`,
                     background: genre === displayGenre ? genreColors[genre] : '#333',
                   }}
                 />
               </div>
             </div>
             <span style={{ fontSize: 11, color: '#555', minWidth: 32, textAlign: 'right' }}>
-              {Math.round(score * 100)}%
+              {Math.round((raw || 0) * 100)}% / {Math.round((weighted || 0) * 100)}%
             </span>
           </div>
         ))}
