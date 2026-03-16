@@ -22,6 +22,9 @@ const SILENCE_THRESHOLD = 0.005     // RMS below this = silence
 const BPM_RESYNC_WINDOW_MS = 10000
 const ENVELOPE_WINDOW_MS = 12000
 const TEMPO_ESTIMATE_INTERVAL_MS = 1000
+const BEAT_ACTIVE_WINDOW_MS = 1400
+const BPM_LOCK_TOLERANCE = 6
+const BPM_LOCK_HARD_TOLERANCE = 12
 
 let analyzer = null
 let onsetHistory = []               // timestamps of detected onsets
@@ -104,7 +107,18 @@ function handleFrame(features) {
     }
     const onsetBpm = estimateOnsetBPM(onsetHistory)
     if (onsetBpm) {
-      smoothedBpm = smoothedBpm * 0.75 + onsetBpm * 0.25
+      const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
+      const beatPresent = (now - lastOnsetTime) <= BEAT_ACTIVE_WINDOW_MS
+      const delta = Math.abs(onsetBpm - smoothedBpm)
+
+      let onsetWeight = 0.25
+      if (beatPresent && beatLockStrength > 0.7) {
+        onsetWeight = delta <= BPM_LOCK_TOLERANCE ? 0.12 : 0.03
+      } else if (beatLockStrength > 0.45 && delta > BPM_LOCK_HARD_TOLERANCE) {
+        onsetWeight = 0.08
+      }
+
+      smoothedBpm = smoothedBpm * (1 - onsetWeight) + onsetBpm * onsetWeight
     }
   }
 
@@ -112,7 +126,18 @@ function handleFrame(features) {
     lastTempoEstimate = now
     const envelopeBpm = estimateEnvelopeBPM(envelopeHistory)
     if (envelopeBpm) {
-      smoothedBpm = smoothedBpm * 0.7 + envelopeBpm * 0.3
+      const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
+      const beatPresent = (now - lastOnsetTime) <= BEAT_ACTIVE_WINDOW_MS
+      const delta = Math.abs(envelopeBpm - smoothedBpm)
+
+      let envelopeWeight = 0.3
+      if (beatPresent && beatLockStrength > 0.7) {
+        envelopeWeight = delta <= BPM_LOCK_TOLERANCE ? 0.08 : 0.02
+      } else if (beatLockStrength > 0.45 && delta > BPM_LOCK_HARD_TOLERANCE) {
+        envelopeWeight = 0.1
+      }
+
+      smoothedBpm = smoothedBpm * (1 - envelopeWeight) + envelopeBpm * envelopeWeight
     }
   }
 
@@ -124,6 +149,29 @@ function handleFrame(features) {
     zcr: zcr || 0,
     isSilent,
   })
+}
+
+function estimateBeatLockStrength(timestamps, referenceBpm) {
+  if (timestamps.length < 6 || !Number.isFinite(referenceBpm) || referenceBpm <= 0) return 0
+
+  const expectedInterval = 60000 / referenceBpm
+  const intervals = []
+  for (let i = 1; i < timestamps.length; i++) {
+    intervals.push(timestamps[i] - timestamps[i - 1])
+  }
+  if (!intervals.length) return 0
+
+  let coherent = 0
+  for (const interval of intervals) {
+    const closest = Math.min(
+      Math.abs(interval - expectedInterval),
+      Math.abs(interval - expectedInterval * 0.5),
+      Math.abs(interval - expectedInterval * 2),
+    )
+    if (closest <= 45) coherent++
+  }
+
+  return coherent / intervals.length
 }
 
 function estimateOnsetBPM(timestamps) {
