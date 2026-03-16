@@ -155,6 +155,7 @@ const GENRE_NORMALIZATION = {
 
 let essentiaModule = null
 let modelLoaded = false
+let maestClassLabels = null
 let audioBuffer = []
 let analysisInterval = null
 let candidateGenre = null
@@ -163,6 +164,7 @@ let currentGenre = 'unknown'
 let contextWeights = {}  // Set from user's "tonight's context"
 let callback = null
 let realtimeHint = { bpm: 0, centroid: 0, energy: 0 }
+let inferenceFailureCount = 0
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -328,11 +330,46 @@ async function loadEssentia() {
       return
     }
     essentiaModule = await EssentiaModule.default()
+    maestClassLabels = await loadMaestClassLabels()
     modelLoaded = true
     console.log('[GenreDetector] Essentia.js loaded successfully')
+    if (!maestClassLabels?.length) {
+      console.warn('[GenreDetector] MAEST class labels were not found; label-to-genre mapping may be degraded')
+    }
   } catch (err) {
     console.warn('[GenreDetector] Could not load Essentia.js:', err.message)
   }
+}
+
+async function loadMaestClassLabels() {
+  const candidates = [
+    '/models/maest-30s-pw.labels.json',
+    '/models/discogs-maest-30s-pw-129e-519l.labels.json',
+    '/models/maest-30s-pw.classes.json',
+  ]
+
+  for (const path of candidates) {
+    try {
+      const response = await fetch(path)
+      if (!response.ok) continue
+      const data = await response.json()
+      const labels = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.classes)
+          ? data.classes
+          : Array.isArray(data?.labels)
+            ? data.labels
+            : null
+      if (labels?.length) {
+        console.log(`[GenreDetector] Loaded ${labels.length} MAEST labels from ${path}`)
+        return labels.map((label) => String(label || ''))
+      }
+    } catch {
+      // Optional metadata file; keep probing candidates.
+    }
+  }
+
+  return null
 }
 
 async function runEssentiaModel(samples) {
@@ -347,15 +384,51 @@ async function runEssentiaModel(samples) {
 
     // Model inference (requires loaded TF.js model)
     // This is a simplified call — actual Essentia.js API varies by version
-    const predictions = await essentia.TensorflowPredict2D(features, {
+    const rawPredictions = await essentia.TensorflowPredict2D(features, {
       graphFilename: 'maest-30s-pw',
     })
 
-    return mapEssentiaToGenres(predictions)
+    const labelScorePairs = extractLabelScorePairs(rawPredictions)
+    if (!labelScorePairs.length) {
+      throw new Error('No valid MAEST predictions were returned')
+    }
+
+    inferenceFailureCount = 0
+    modelLoaded = true
+    return mapEssentiaToGenres(labelScorePairs)
   } catch (err) {
+    inferenceFailureCount += 1
+    if (inferenceFailureCount >= 3) modelLoaded = false
     console.warn('[GenreDetector] Model inference failed:', err.message)
     return spectralHeuristic(samples)
   }
+}
+
+function extractLabelScorePairs(predictions) {
+  if (!predictions) return []
+
+  // Case 1: already in [[label, score], ...] format.
+  if (Array.isArray(predictions) && Array.isArray(predictions[0])) {
+    return predictions
+      .map(([label, score]) => [String(label || ''), Number(score) || 0])
+      .filter(([label, score]) => label && Number.isFinite(score))
+  }
+
+  // Case 2: model output as flat logits/probabilities array.
+  if (Array.isArray(predictions) && typeof predictions[0] === 'number') {
+    if (!maestClassLabels?.length) return []
+    return predictions.map((score, idx) => [maestClassLabels[idx] || `class_${idx}`, Number(score) || 0])
+  }
+
+  // Case 3: object payload from inference wrappers.
+  const classes = predictions.classes || predictions.labels || maestClassLabels
+  const scores = predictions.activations || predictions.predictions || predictions.scores || predictions.data
+  if (Array.isArray(classes) && Array.isArray(scores)) {
+    const len = Math.min(classes.length, scores.length)
+    return Array.from({ length: len }, (_, i) => [String(classes[i] || `class_${i}`), Number(scores[i]) || 0])
+  }
+
+  return []
 }
 
 function mapEssentiaToGenres(predictions) {
@@ -364,7 +437,10 @@ function mapEssentiaToGenres(predictions) {
   const hitCounts = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 0]))
 
   for (const [label, score] of predictions) {
-    const mappedGenre = DISCOS_LABEL_TO_GENRE[normalizeLabel(label)]
+    const normalizedLabel = normalizeLabel(label)
+    const mappedGenre =
+      DISCOS_LABEL_TO_GENRE[normalizedLabel]
+      || inferGenreFromLabelTokens(normalizedLabel)
     if (!mappedGenre) continue
     scores[mappedGenre] += score
     hitCounts[mappedGenre] += 1
@@ -378,6 +454,52 @@ function mapEssentiaToGenres(predictions) {
   }
 
   return normalizeScoreMap(scores)
+}
+
+const TOKEN_TO_GENRE = {
+  techno: 'techno',
+  house: 'edm',
+  electro: 'edm',
+  trance: 'edm',
+  dubstep: 'edm',
+  bass: 'edm',
+  hiphop: 'hiphop',
+  rap: 'hiphop',
+  rnb: 'hiphop',
+  soul: 'hiphop',
+  funk: 'hiphop',
+  pop: 'pop',
+  dance: 'pop',
+  synthpop: 'pop',
+  wave: 'eighties',
+  synthwave: 'eighties',
+  disco: 'eighties',
+  italo: 'eighties',
+  latin: 'latin',
+  reggaeton: 'latin',
+  afro: 'latin',
+  salsa: 'latin',
+  rock: 'rock',
+  metal: 'rock',
+  punk: 'rock',
+  ambient: 'corporate',
+  classical: 'corporate',
+  jazz: 'corporate',
+  acoustic: 'corporate',
+  lounge: 'corporate',
+}
+
+function inferGenreFromLabelTokens(normalizedLabel) {
+  if (!normalizedLabel) return null
+  const compact = normalizedLabel.replace(/\s+/g, '')
+  if (TOKEN_TO_GENRE[compact]) return TOKEN_TO_GENRE[compact]
+
+  const parts = normalizedLabel.split(' ')
+  for (const token of parts) {
+    if (TOKEN_TO_GENRE[token]) return TOKEN_TO_GENRE[token]
+  }
+
+  return null
 }
 
 function normalizeLabel(label) {

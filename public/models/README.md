@@ -33,6 +33,7 @@ The app can use the Discogs MAEST-30s model for 519-class music style classifica
 | File | Size | Notes |
 |------|------|-------|
 | `maest-30s-pw.onnx` | ~200 MB | ONNX model file |
+| `maest-30s-pw.labels.json` | ~40 KB | Optional class labels for robust MAEST output parsing |
 
 Download with curl:
 
@@ -46,6 +47,16 @@ Or manually: go to [https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519
 
 Without this model, Essentia's lower-level audio features still improve detection over
 the pure spectral heuristic fallback.
+
+### Optional labels metadata
+
+MAEST integrations can return raw score arrays without label strings depending on runtime/API
+version. If that happens, include a labels file in this folder as either:
+
+- `maest-30s-pw.labels.json`
+- `discogs-maest-30s-pw-129e-519l.labels.json`
+
+Both files should be a JSON array of 519 class names (or an object with a `labels`/`classes` array).
 
 ## Verification
 

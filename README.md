@@ -108,6 +108,8 @@ cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
 
 This model gives the app full 519-class music style classification instead of the basic heuristic. Download the file directly:
 
+> Tip: add optional class labels file `public/models/maest-30s-pw.labels.json` (JSON array of class names) so the detector can parse MAEST outputs across Essentia runtime variations.
+
 ```bash
 mkdir -p public/models
 ```
