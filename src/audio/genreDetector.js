@@ -22,6 +22,12 @@ const GENRE_MARGIN_THRESHOLD = 0.08
 const HYSTERESIS_WINDOWS = 2
 const INPUT_SAMPLE_RATE = 44100
 const MODEL_SAMPLE_RATE = 16000
+const MAEST_LABELS_URL = '/models/discogs_519labels.txt'
+const MAEST_GRAPH_FILENAMES = [
+  '/models/maest-30s-pw',
+  '/models/maest-30s-pw/model',
+  'maest-30s-pw',
+]
 
 // ── Genre label mapping ──────────────────────────────────────────────────────
 // Maps Essentia/Discogs style tags → our internal genre IDs
@@ -163,6 +169,7 @@ let currentGenre = 'unknown'
 let contextWeights = {}  // Set from user's "tonight's context"
 let callback = null
 let realtimeHint = { bpm: 0, centroid: 0, energy: 0 }
+let maestLabels = null
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -328,10 +335,27 @@ async function loadEssentia() {
       return
     }
     essentiaModule = await EssentiaModule.default()
+    maestLabels = await loadMaestLabels()
     modelLoaded = true
-    console.log('[GenreDetector] Essentia.js loaded successfully')
+    console.log('[GenreDetector] Essentia.js loaded successfully', maestLabels?.length ? `(labels: ${maestLabels.length})` : '(labels unavailable)')
   } catch (err) {
     console.warn('[GenreDetector] Could not load Essentia.js:', err.message)
+  }
+}
+
+async function loadMaestLabels() {
+  try {
+    const response = await fetch(MAEST_LABELS_URL)
+    if (!response.ok) return null
+    const text = await response.text()
+    const labels = text
+      .split('\n')
+      .map((line) => normalizeLabel(line))
+      .filter(Boolean)
+
+    return labels.length ? labels : null
+  } catch {
+    return null
   }
 }
 
@@ -347,15 +371,58 @@ async function runEssentiaModel(samples) {
 
     // Model inference (requires loaded TF.js model)
     // This is a simplified call — actual Essentia.js API varies by version
-    const predictions = await essentia.TensorflowPredict2D(features, {
-      graphFilename: 'maest-30s-pw',
-    })
+    const predictions = await predictMaest(essentia, features)
 
     return mapEssentiaToGenres(predictions)
   } catch (err) {
     console.warn('[GenreDetector] Model inference failed:', err.message)
     return spectralHeuristic(samples)
   }
+}
+
+async function predictMaest(essentia, features) {
+  let lastError = null
+
+  for (const graphFilename of MAEST_GRAPH_FILENAMES) {
+    try {
+      const predictions = await essentia.TensorflowPredict2D(features, { graphFilename })
+      const parsed = parsePredictionOutput(predictions)
+      if (parsed.length > 0) return parsed
+    } catch (err) {
+      lastError = err
+    }
+  }
+
+  throw new Error(lastError?.message || 'No valid MAEST model prediction output')
+}
+
+function parsePredictionOutput(predictions) {
+  if (!predictions) return []
+
+  if (Array.isArray(predictions) && Array.isArray(predictions[0])) {
+    if (typeof predictions[0][0] === 'string') {
+      return predictions
+    }
+
+    if (typeof predictions[0][0] === 'number' && maestLabels?.length) {
+      const flatScores = predictions.flat()
+      return flatScores.map((score, index) => [maestLabels[index] || `label_${index}`, score])
+    }
+  }
+
+  if (Array.isArray(predictions) && typeof predictions[0] === 'number' && maestLabels?.length) {
+    return predictions.map((score, index) => [maestLabels[index] || `label_${index}`, score])
+  }
+
+  if (Array.isArray(predictions) && predictions[0] && typeof predictions[0] === 'object') {
+    const withLabelScore = predictions
+      .map((item) => [item.label, item.score])
+      .filter(([label, score]) => typeof label === 'string' && Number.isFinite(score))
+
+    if (withLabelScore.length) return withLabelScore
+  }
+
+  return []
 }
 
 function mapEssentiaToGenres(predictions) {

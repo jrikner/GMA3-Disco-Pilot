@@ -116,10 +116,14 @@ mkdir -p public/models
 curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" -o public/models/maest-30s-pw.onnx
 ```
 
+```bash
+curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/discogs_519labels.txt" -o public/models/discogs_519labels.txt
+```
+
 Or if you prefer to download it manually:
 1. Go to [https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l](https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l)
-2. Click the **↓** icon next to `maest-30s-pw.onnx` in the file list
-3. Move the downloaded file to `public/models/maest-30s-pw.onnx`
+2. Click the **↓** icon next to `maest-30s-pw.onnx` and `discogs_519labels.txt` in the file list
+3. Move the downloaded files to `public/models/`
 
 See [`public/models/README.md`](public/models/README.md) for more details.
 
