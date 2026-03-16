@@ -17,8 +17,8 @@
 
 const MAEST_CONTEXT_SECONDS = 30
 const ANALYSIS_INTERVAL_MS = 5000
-const CONFIDENCE_THRESHOLD = 0.55
-const GENRE_MARGIN_THRESHOLD = 0.08
+const CONFIDENCE_THRESHOLD = 0.38
+const GENRE_MARGIN_THRESHOLD = 0.05
 const HYSTERESIS_WINDOWS = 2
 const INPUT_SAMPLE_RATE = 44100
 const MODEL_SAMPLE_RATE = 16000
@@ -36,6 +36,7 @@ const DISCOS_LABEL_TO_GENRE = {
   'acid techno': 'techno',
   'hard techno': 'techno',
   hardtechno: 'techno',
+  minimal: 'techno',
   'minimal techno': 'techno',
   'tech house': 'techno',
   industrial: 'techno',
@@ -68,10 +69,14 @@ const DISCOS_LABEL_TO_GENRE = {
   // Pop
   pop: 'pop',
   dancepop: 'pop',
+  'dance pop': 'pop',
   synthpop: 'pop',
+  'synth pop': 'pop',
   electropop: 'pop',
+  'electro pop': 'pop',
   'indie pop': 'pop',
   kpop: 'pop',
+  'k pop': 'pop',
   'teen pop': 'pop',
   'dream pop': 'pop',
   // 80s
@@ -79,11 +84,15 @@ const DISCOS_LABEL_TO_GENRE = {
   '1980s': 'eighties',
   'new wave': 'eighties',
   postpunk: 'eighties',
+  'post punk': 'eighties',
   synthwave: 'eighties',
+  'synth wave': 'eighties',
   'italo disco': 'eighties',
   disco: 'eighties',
   hinrg: 'eighties',
+  'hi nrg': 'eighties',
   eurodisco: 'eighties',
+  'euro disco': 'eighties',
   // Latin / Afro
   latin: 'latin',
   reggaeton: 'latin',
@@ -251,6 +260,8 @@ async function runAnalysis() {
 function selectGenre(scores) {
   const rawScores = normalizeScoreMap(scores)
   const weightedScores = {}
+  const confidenceThreshold = modelLoaded ? CONFIDENCE_THRESHOLD : 0.24
+  const marginThreshold = modelLoaded ? GENRE_MARGIN_THRESHOLD : 0.02
 
   for (const genre of ALL_GENRES) {
     const contextWeight = contextWeights[genre] || 1.0
@@ -268,11 +279,11 @@ function selectGenre(scores) {
   const weightedTopScore = weightedSorted[0]?.[1] || rawTopScore
 
   let selectedGenre = rawTopGenre || 'unknown'
-  if (rawTopScore < CONFIDENCE_THRESHOLD || rawDelta < GENRE_MARGIN_THRESHOLD) {
+  if (rawTopScore < confidenceThreshold || rawDelta < marginThreshold) {
     selectedGenre = currentGenre !== 'unknown' ? currentGenre : 'unknown'
   } else if (weightedTopGenre !== rawTopGenre) {
     const weightedAltRaw = rawScores[weightedTopGenre] || 0
-    const closeRaw = Math.abs(rawTopScore - weightedAltRaw) <= GENRE_MARGIN_THRESHOLD
+    const closeRaw = Math.abs(rawTopScore - weightedAltRaw) <= marginThreshold
     if (closeRaw) selectedGenre = weightedTopGenre
   }
 

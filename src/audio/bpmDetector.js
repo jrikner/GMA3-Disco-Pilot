@@ -36,6 +36,10 @@ export function startBPMDetector(audioContext, sourceNode, cb) {
   callback = cb
   onsetHistory = []
   silenceFrames = 0
+  lastOnsetTime = 0
+  smoothedBpm = 120
+  smoothedEnergy = 0
+  smoothedCentroid = 0
 
   analyzer = Meyda.createMeydaAnalyzer({
     audioContext,
@@ -53,6 +57,9 @@ export function stopBPMDetector() {
     analyzer.stop()
     analyzer = null
   }
+  onsetHistory = []
+  silenceFrames = 0
+  lastOnsetTime = 0
   callback = null
 }
 
