@@ -44,19 +44,21 @@ Each profile controls: color look sequence, active phasers (P/T slow, P/T fast, 
 
 ### 0. Clone the repo and go to the project folder
 
-Open Terminal, then run:
+Open Terminal, then run each command one line at a time:
 
 ```bash
-# (optional) go to the folder where you keep projects
 cd ~/Desktop
+```
 
-# clone this repository
+```bash
 git clone https://github.com/jrikner/GMA3-Disco-Pilot.git
+```
 
-# enter the project folder
+```bash
 cd GMA3-Disco-Pilot
+```
 
-# confirm you're in the right place
+```bash
 pwd
 ```
 
@@ -67,10 +69,10 @@ You should now be inside the repo root (`.../GMA3-Disco-Pilot`). Run all `npm` c
 macOS does not come with Node.js pre-installed. The easiest way is [Homebrew](https://brew.sh):
 
 ```bash
-# Install Homebrew first if you don't have it
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
 
-# Then install Node.js
+```bash
 brew install node
 ```
 
@@ -88,9 +90,17 @@ Without these the app uses a spectral heuristic fallback — still works, but ge
 
 ```bash
 npm install essentia.js
+```
+
+```bash
 cp node_modules/essentia.js/dist/essentia-wasm.es.js public/models/
-# Some essentia.js versions publish a different WASM filename in dist/
+```
+
+```bash
 WASM_SRC=$(find node_modules/essentia.js/dist -maxdepth 1 -type f -name 'essentia-wasm*.wasm' | head -n 1)
+```
+
+```bash
 cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
 ```
 
@@ -100,8 +110,10 @@ This model gives the app full 519-class music style classification instead of th
 
 ```bash
 mkdir -p public/models
-curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" \
-     -o public/models/maest-30s-pw.onnx
+```
+
+```bash
+curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" -o public/models/maest-30s-pw.onnx
 ```
 
 Or if you prefer to download it manually:
