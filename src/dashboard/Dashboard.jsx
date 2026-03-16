@@ -14,7 +14,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import useStore from '../store/appState.js'
 import { startCapture, stopCapture, listAudioDevices } from '../audio/capture.js'
 import { startBPMDetector, stopBPMDetector } from '../audio/bpmDetector.js'
-import { initGenreDetector, startGenreDetector, stopGenreDetector, setContextWeights } from '../audio/genreDetector.js'
+import { initGenreDetector, startGenreDetector, stopGenreDetector, setContextWeights, setGenreRealtimeHint } from '../audio/genreDetector.js'
 import * as profileMapper from '../profiles/profileMapper.js'
 import { getProfile, ALL_GENRES, TONIGHT_CONTEXTS } from '../profiles/genreProfiles.js'
 import * as oscClient from '../osc/client.js'
@@ -109,6 +109,7 @@ export default function Dashboard() {
           rms: frame.rms,
           isSilent: frame.isSilent,
         })
+        setGenreRealtimeHint({ bpm: frame.bpm, centroid: frame.spectralCentroid, energy: frame.energy })
         profileMapper.onAudioFrame(frame)
       })
 
