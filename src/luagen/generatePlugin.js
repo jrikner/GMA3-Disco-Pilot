@@ -17,6 +17,7 @@
  */
 
 import { GENRE_PROFILES } from '../profiles/genreProfiles.js'
+import { buildCueFriendlyPalette } from '../profiles/paletteAdapter.js'
 
 /**
  * @param {Object} config
@@ -251,9 +252,7 @@ function escapeLuaString(value) {
 }
 
 /**
- * Filter/adjust the genre's color palette given user avoid/emphasize preferences.
- * - Remove colors whose hue is within 30° of any avoided color
- * - Prepend emphasized colors if applicable
+ * Build a cue-friendly palette from the genre profile and user constraints.
  */
 function selectColors(palette, avoidColors, emphasizeColors) {
   const filtered = palette.filter(c =>
