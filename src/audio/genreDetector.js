@@ -4,8 +4,8 @@
  * Uses the Discogs MAEST model (maest-30s-pw) which classifies 519 music styles.
  * We map the raw 519-label output to our 8 internal genre categories.
  *
- * Analysis runs on a rolling 15-second window every 5 seconds.
- * A genre change requires >60% confidence for 2 consecutive windows (hysteresis).
+ * Analysis runs on a rolling 30-second context window every 5 seconds.
+ * A genre change requires >55% confidence for 2 consecutive windows (hysteresis).
  *
  * NOTE: Essentia.js WASM and model files must be placed in /public/models/
  * Required files:
@@ -15,11 +15,12 @@
  * Until the model is loaded, genre detection falls back to spectral heuristics.
  */
 
-const WINDOW_SECONDS = 15
+const MAEST_CONTEXT_SECONDS = 30
 const ANALYSIS_INTERVAL_MS = 5000
-const CONFIDENCE_THRESHOLD = 0.60
+const CONFIDENCE_THRESHOLD = 0.55
 const HYSTERESIS_WINDOWS = 2
-const SAMPLE_RATE = 44100
+const INPUT_SAMPLE_RATE = 44100
+const MODEL_SAMPLE_RATE = 16000
 
 // ── Genre label mapping ──────────────────────────────────────────────────────
 // Maps Essentia/Discogs style tags → our internal genre IDs
@@ -98,10 +99,10 @@ export function startGenreDetector(audioContext, cb) {
   // For production: use AudioWorklet
   const processor = audioContext.createScriptProcessor(4096, 1, 1)
   processor.onaudioprocess = (e) => {
-    const samples = Array.from(e.inputBuffer.getChannelData(0))
+    const samples = normalizeMonoSamples(e.inputBuffer.getChannelData(0))
     audioBuffer.push(...samples)
-    // Keep only last WINDOW_SECONDS worth of audio
-    const maxSamples = WINDOW_SECONDS * SAMPLE_RATE
+    // Keep only last MAEST_CONTEXT_SECONDS worth of audio
+    const maxSamples = MAEST_CONTEXT_SECONDS * INPUT_SAMPLE_RATE
     if (audioBuffer.length > maxSamples) {
       audioBuffer = audioBuffer.slice(audioBuffer.length - maxSamples)
     }
@@ -128,9 +129,10 @@ export function getCurrentGenre() {
 // ── Core Analysis ─────────────────────────────────────────────────────────────
 
 async function runAnalysis() {
-  if (audioBuffer.length < SAMPLE_RATE * 5) return  // Need at least 5s
+  const minimumWindowSamples = MAEST_CONTEXT_SECONDS * INPUT_SAMPLE_RATE
+  if (audioBuffer.length < minimumWindowSamples) return
 
-  const windowSamples = audioBuffer.slice()
+  const windowSamples = normalizeMonoSamples(audioBuffer.slice(audioBuffer.length - minimumWindowSamples))
 
   let scores
   if (modelLoaded && essentiaModule) {
@@ -207,11 +209,9 @@ async function loadEssentia() {
 async function runEssentiaModel(samples) {
   try {
     const essentia = essentiaModule
-    const vectorInput = essentia.arrayToVector(new Float32Array(samples))
-
-    // Resample to the model's expected rate if needed
-    // MAEST model expects mono audio at 16kHz
-    // For now we pass as-is; production should resample
+    const resampled = resampleLinear(samples, INPUT_SAMPLE_RATE, MODEL_SAMPLE_RATE)
+    const normalized = normalizeMonoSamples(resampled)
+    const vectorInput = essentia.arrayToVector(new Float32Array(normalized))
 
     // Feature extraction
     const features = essentia.TensorflowInputMusiCNN(vectorInput)
@@ -253,6 +253,46 @@ function mapEssentiaToGenres(predictions) {
   return scores
 }
 
+function normalizeMonoSamples(samples) {
+  if (!samples || samples.length === 0) return []
+
+  let peak = 0
+  for (let i = 0; i < samples.length; i++) {
+    const abs = Math.abs(samples[i])
+    if (abs > peak) peak = abs
+  }
+
+  if (peak === 0) {
+    return Array.from(samples)
+  }
+
+  const scale = 1 / peak
+  const normalized = new Array(samples.length)
+  for (let i = 0; i < samples.length; i++) {
+    normalized[i] = samples[i] * scale
+  }
+
+  return normalized
+}
+
+function resampleLinear(samples, fromRate, toRate) {
+  if (fromRate === toRate) return Array.from(samples)
+
+  const ratio = fromRate / toRate
+  const outputLength = Math.max(1, Math.floor(samples.length / ratio))
+  const resampled = new Array(outputLength)
+
+  for (let i = 0; i < outputLength; i++) {
+    const sourceIndex = i * ratio
+    const lower = Math.floor(sourceIndex)
+    const upper = Math.min(lower + 1, samples.length - 1)
+    const interpolation = sourceIndex - lower
+    resampled[i] = samples[lower] + (samples[upper] - samples[lower]) * interpolation
+  }
+
+  return resampled
+}
+
 // ── Spectral Heuristic Fallback ───────────────────────────────────────────────
 // When Essentia model is unavailable, estimate genre from basic spectral features
 
@@ -271,7 +311,7 @@ function spectralHeuristic(samples) {
 
   // Very rough spectral centroid via DFT magnitude weighting (simplified)
   // This is intentionally simple — the real model is the proper path
-  const centroidRatio = zcr * SAMPLE_RATE  // rough proxy
+  const centroidRatio = zcr * INPUT_SAMPLE_RATE  // rough proxy
 
   const scores = {
     techno: 0, edm: 0, hiphop: 0, pop: 0,
