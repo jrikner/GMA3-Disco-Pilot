@@ -188,7 +188,9 @@ async function loadEssentia() {
     // Dynamic import from /public/models/
     // IMPORTANT: use a variable + @vite-ignore so missing optional model files
     // do not crash Vite import analysis during startup.
-    const essentiaUrl = '/models/essentia-wasm.es.js'
+    // Use an absolute URL computed at runtime so Vite does not try to
+    // pre-transform/import files from /public during dev.
+    const essentiaUrl = new URL('/models/essentia-wasm.es.js', window.location.origin).href
     const EssentiaModule = await import(/* @vite-ignore */ essentiaUrl).catch(() => null)
     if (!EssentiaModule) {
       console.warn('[GenreDetector] Essentia.js not found in /public/models/ — using spectral heuristic fallback')
