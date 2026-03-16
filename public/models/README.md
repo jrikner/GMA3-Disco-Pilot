@@ -33,6 +33,7 @@ The app can use the Discogs MAEST-30s model for 519-class music style classifica
 | File | Size | Notes |
 |------|------|-------|
 | `maest-30s-pw.onnx` | ~200 MB | ONNX model file |
+| `discogs_519labels.txt` | ~6 KB | Label list used to map MAEST output logits back to style names |
 
 Download with curl:
 
@@ -40,12 +41,18 @@ Download with curl:
 mkdir -p public/models
 curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" \
      -o public/models/maest-30s-pw.onnx
+
+curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/discogs_519labels.txt" \
+     -o public/models/discogs_519labels.txt
 ```
 
 Or manually: go to [https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l](https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l), click the **↓** icon next to `maest-30s-pw.onnx`, and move the file here.
 
 Without this model, Essentia's lower-level audio features still improve detection over
 the pure spectral heuristic fallback.
+
+If `discogs_519labels.txt` is missing, the detector can still run but MAEST predictions
+cannot be reliably mapped to the internal 8 genres.
 
 ## Verification
 
