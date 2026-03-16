@@ -19,6 +19,7 @@ export default function PluginGenerator() {
   const [pluginDescription, setPluginDescription] = useState(
     'Creates Disco Pilot color looks and helper executors in MA3.',
   )
+  const [positionPreset, setPositionPreset] = useState('')
 
   const luaFileName = 'GMA3_Disco_Pilot_Plugin.lua'
   const xmlFileName = 'GMA3_Disco_Pilot_Plugin.xml'
@@ -39,6 +40,7 @@ export default function PluginGenerator() {
       page: session.freeExecutorPage,
       startExec: session.freeExecutorStart,
       phaserConfig: session.phaserConfig || {},
+      positionPreset: positionPreset ? Number(positionPreset) : undefined,
     })
     setLuaCode(code)
     setGenerated(true)
@@ -120,6 +122,26 @@ export default function PluginGenerator() {
       </div>
 
       <div className={styles.card}>
+        <div className={styles.label}>Optional base position preset</div>
+        <p style={{ fontSize: 13, color: '#aaa', marginTop: 10, lineHeight: 1.7 }}>
+          If your showfile already has a shared position preset, enter its number (Preset Pool 2.x).
+          The generator will apply it before creating Pan/Tilt phaser sequences. Leave blank to skip.
+        </p>
+        <label style={{ display: 'grid', gap: 6, fontSize: 12, color: '#aaa', marginTop: 10 }}>
+          Position preset number (x in Preset 2.x)
+          <input
+            value={positionPreset}
+            onChange={(e) => {
+              const value = e.target.value.replace(/[^0-9]/g, '')
+              setPositionPreset(value)
+            }}
+            placeholder="e.g. 101"
+            style={{ padding: 10, borderRadius: 8, border: '1px solid #2a2a3a', background: '#101018', color: '#e0e0e0' }}
+          />
+        </label>
+      </div>
+
+      <div className={styles.card}>
         <div className={styles.label}>Plugin metadata (for XML export)</div>
         <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
           <label style={{ display: 'grid', gap: 6, fontSize: 12, color: '#aaa' }}>
@@ -195,9 +217,9 @@ export default function PluginGenerator() {
           <div className={styles.card} style={{ marginTop: 16, borderColor: '#166534' }}>
             <div className={styles.label} style={{ color: '#22c55e' }}>How to import into GrandMA3</div>
             <ol style={{ fontSize: 13, color: '#aaa', lineHeight: 2, paddingLeft: 20, marginTop: 12 }}>
-              <li>Copy the downloaded <strong style={{ color: '#e0e0e0' }}>.lua</strong> file to a USB drive or your MA3's shared folder</li>
+              <li>Copy the downloaded <strong style={{ color: '#e0e0e0' }}>.xml</strong> and <strong style={{ color: '#e0e0e0' }}>.lua</strong> files to your MA3 plugin folder or USB</li>
               <li>In MA3: <strong style={{ color: '#e0e0e0' }}>Menu → Plugins → Import Plugin</strong></li>
-              <li>Select the file</li>
+              <li>Select the <strong style={{ color: '#e0e0e0' }}>.xml</strong> file (MA3 requires XML for import)</li>
               <li>Go to the Plugins view and <strong style={{ color: '#e0e0e0' }}>Run</strong> the plugin</li>
               <li>Check the console's info bar for the success message</li>
             </ol>
