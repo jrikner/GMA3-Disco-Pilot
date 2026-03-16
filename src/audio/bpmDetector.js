@@ -20,14 +20,18 @@ const MIN_BPM = 60
 const MAX_BPM = 200
 const SILENCE_THRESHOLD = 0.005     // RMS below this = silence
 const BPM_RESYNC_WINDOW_MS = 10000
+const ENVELOPE_WINDOW_MS = 12000
+const TEMPO_ESTIMATE_INTERVAL_MS = 1000
 
 let analyzer = null
 let onsetHistory = []               // timestamps of detected onsets
+let envelopeHistory = []            // { t, e } envelope samples
 let lastOnsetTime = 0
 let smoothedBpm = 120
 let smoothedEnergy = 0
 let smoothedCentroid = 0
 let silenceFrames = 0
+let lastTempoEstimate = 0
 const SILENCE_FRAMES_THRESHOLD = 30 // ~3 seconds of silence
 
 let callback = null
@@ -35,8 +39,10 @@ let callback = null
 export function startBPMDetector(audioContext, sourceNode, cb) {
   callback = cb
   onsetHistory = []
+  envelopeHistory = []
   silenceFrames = 0
   lastOnsetTime = 0
+  lastTempoEstimate = 0
   smoothedBpm = 120
   smoothedEnergy = 0
   smoothedCentroid = 0
@@ -58,8 +64,10 @@ export function stopBPMDetector() {
     analyzer = null
   }
   onsetHistory = []
+  envelopeHistory = []
   silenceFrames = 0
   lastOnsetTime = 0
+  lastTempoEstimate = 0
   callback = null
 }
 
@@ -82,6 +90,10 @@ function handleFrame(features) {
   smoothedEnergy = smoothedEnergy * 0.85 + (rms || 0) * 0.15
   smoothedCentroid = smoothedCentroid * 0.9 + (spectralCentroid || 5000) * 0.1
 
+  // Keep an energy envelope history for autocorrelation tempo estimation.
+  envelopeHistory.push({ t: now, e: smoothedEnergy })
+  envelopeHistory = envelopeHistory.filter((p) => (now - p.t) <= ENVELOPE_WINDOW_MS)
+
   // Onset detection: significant energy spike = beat candidate
   if (!isSilent && rms > smoothedEnergy * 1.4 && (now - lastOnsetTime) > 200) {
     lastOnsetTime = now
@@ -90,7 +102,18 @@ function handleFrame(features) {
     if (onsetHistory.length > BEAT_HISTORY_MAX) {
       onsetHistory.shift()
     }
-    smoothedBpm = estimateBPM(onsetHistory) || smoothedBpm
+    const onsetBpm = estimateOnsetBPM(onsetHistory)
+    if (onsetBpm) {
+      smoothedBpm = smoothedBpm * 0.75 + onsetBpm * 0.25
+    }
+  }
+
+  if (!isSilent && (now - lastTempoEstimate) >= TEMPO_ESTIMATE_INTERVAL_MS) {
+    lastTempoEstimate = now
+    const envelopeBpm = estimateEnvelopeBPM(envelopeHistory)
+    if (envelopeBpm) {
+      smoothedBpm = smoothedBpm * 0.7 + envelopeBpm * 0.3
+    }
   }
 
   callback?.({
@@ -103,7 +126,7 @@ function handleFrame(features) {
   })
 }
 
-function estimateBPM(timestamps) {
+function estimateOnsetBPM(timestamps) {
   if (timestamps.length < 4) return null
 
   // Calculate intervals between consecutive onsets
@@ -137,6 +160,39 @@ function estimateBPM(timestamps) {
 
   if (!bestBpm) return null
 
-  // Smooth toward the new estimate
-  return smoothedBpm * 0.7 + bestBpm * 0.3
+  return bestBpm
+}
+
+function estimateEnvelopeBPM(points) {
+  if (points.length < 32) return null
+
+  const values = points.map((p) => p.e)
+  const mean = values.reduce((sum, v) => sum + v, 0) / values.length
+  const centered = values.map((v) => v - mean)
+
+  const frameMs = (points[points.length - 1].t - points[0].t) / (points.length - 1)
+  if (!Number.isFinite(frameMs) || frameMs <= 0) return null
+
+  const minLag = Math.max(1, Math.round((60000 / MAX_BPM) / frameMs))
+  const maxLag = Math.max(minLag + 1, Math.round((60000 / MIN_BPM) / frameMs))
+
+  let bestLag = 0
+  let bestScore = -Infinity
+
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let score = 0
+    for (let i = lag; i < centered.length; i++) {
+      score += centered[i] * centered[i - lag]
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestLag = lag
+    }
+  }
+
+  if (bestLag <= 0 || bestScore <= 0) return null
+  const bpm = 60000 / (bestLag * frameMs)
+  if (!Number.isFinite(bpm) || bpm < MIN_BPM || bpm > MAX_BPM) return null
+
+  return bpm
 }

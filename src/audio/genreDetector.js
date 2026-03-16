@@ -15,10 +15,10 @@
  * Until the model is loaded, genre detection falls back to spectral heuristics.
  */
 
-const MAEST_CONTEXT_SECONDS = 30
-const ANALYSIS_INTERVAL_MS = 5000
-const CONFIDENCE_THRESHOLD = 0.38
-const GENRE_MARGIN_THRESHOLD = 0.05
+const MAEST_CONTEXT_SECONDS = 20
+const ANALYSIS_INTERVAL_MS = 2500
+const CONFIDENCE_THRESHOLD = 0.42
+const GENRE_MARGIN_THRESHOLD = 0.08
 const HYSTERESIS_WINDOWS = 2
 const INPUT_SAMPLE_RATE = 44100
 const MODEL_SAMPLE_RATE = 16000
@@ -162,6 +162,7 @@ let candidateCount = 0
 let currentGenre = 'unknown'
 let contextWeights = {}  // Set from user's "tonight's context"
 let callback = null
+let realtimeHint = { bpm: 0, centroid: 0, energy: 0 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -174,7 +175,7 @@ export function setContextWeights(contextGenres) {
   contextWeights = {}
   // Boost genres the user says are likely tonight
   for (const g of contextGenres) {
-    contextWeights[g] = 2.0  // 2× weight
+    contextWeights[g] = 1.25  // gentle prior only
   }
 }
 
@@ -215,6 +216,14 @@ export function stopGenreDetector() {
 export function getCurrentGenre() {
   return currentGenre
 }
+export function setGenreRealtimeHint(hint = {}) {
+  realtimeHint = {
+    bpm: hint.bpm ?? realtimeHint.bpm,
+    centroid: hint.centroid ?? realtimeHint.centroid,
+    energy: hint.energy ?? realtimeHint.energy,
+  }
+}
+
 
 // ── Core Analysis ─────────────────────────────────────────────────────────────
 
@@ -454,6 +463,8 @@ function spectralHeuristic(samples) {
   }
 
   // Heuristic rules (rough, better than nothing without the model)
+  const hintedBpm = realtimeHint.bpm || 0
+
   if (rms > 0.1 && centroidRatio > 3000) {
     scores.rock += 0.4
     scores.edm += 0.3
@@ -470,6 +481,22 @@ function spectralHeuristic(samples) {
     scores.pop += 0.3
     scores.latin += 0.2
     scores.hiphop += 0.2
+  }
+
+  // Tempo-informed hinting to reduce glaring genre misses in fallback mode.
+  if (hintedBpm >= 128) {
+    scores.techno += 0.25
+    scores.edm += 0.2
+  } else if (hintedBpm >= 110) {
+    scores.pop += 0.2
+    scores.latin += 0.15
+    scores.edm += 0.1
+  } else if (hintedBpm >= 84) {
+    scores.hiphop += 0.25
+    scores.pop += 0.1
+  } else if (hintedBpm > 0) {
+    scores.corporate += 0.25
+    scores.eighties += 0.1
   }
 
   return scores
