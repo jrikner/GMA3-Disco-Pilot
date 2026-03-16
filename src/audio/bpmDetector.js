@@ -14,7 +14,6 @@
 import Meyda from 'meyda'
 
 const BUFFER_SIZE = 4096
-const SAMPLE_RATE = 44100
 const BEAT_HISTORY_MAX = 60         // Keep last N beat intervals
 const MIN_BPM = 60
 const MAX_BPM = 200
@@ -25,6 +24,9 @@ const TEMPO_ESTIMATE_INTERVAL_MS = 1000
 const BEAT_ACTIVE_WINDOW_MS = 1400
 const BPM_LOCK_TOLERANCE = 6
 const BPM_LOCK_HARD_TOLERANCE = 12
+const MIN_ONSET_INTERVAL_MS = 170
+const MAX_ONSET_INTERVAL_MS = 1200
+const ENVELOPE_PEAK_MIN_INTERVAL_MS = 180
 
 let analyzer = null
 let onsetHistory = []               // timestamps of detected onsets
@@ -77,7 +79,7 @@ export function stopBPMDetector() {
 function handleFrame(features) {
   if (!features) return
 
-  const { rms, energy, spectralCentroid, zcr } = features
+  const { rms, spectralCentroid, zcr } = features
   const now = performance.now()
 
   // Silence detection
@@ -98,14 +100,14 @@ function handleFrame(features) {
   envelopeHistory = envelopeHistory.filter((p) => (now - p.t) <= ENVELOPE_WINDOW_MS)
 
   // Onset detection: significant energy spike = beat candidate
-  if (!isSilent && rms > smoothedEnergy * 1.4 && (now - lastOnsetTime) > 200) {
+  if (!isSilent && rms > smoothedEnergy * 1.35 && (now - lastOnsetTime) > MIN_ONSET_INTERVAL_MS) {
     lastOnsetTime = now
     onsetHistory.push(now)
     onsetHistory = onsetHistory.filter(ts => (now - ts) <= BPM_RESYNC_WINDOW_MS)
     if (onsetHistory.length > BEAT_HISTORY_MAX) {
       onsetHistory.shift()
     }
-    const onsetBpm = estimateOnsetBPM(onsetHistory)
+    const onsetBpm = estimateOnsetBPM(onsetHistory, smoothedBpm)
     if (onsetBpm) {
       const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
       const beatPresent = (now - lastOnsetTime) <= BEAT_ACTIVE_WINDOW_MS
@@ -124,7 +126,7 @@ function handleFrame(features) {
 
   if (!isSilent && (now - lastTempoEstimate) >= TEMPO_ESTIMATE_INTERVAL_MS) {
     lastTempoEstimate = now
-    const envelopeBpm = estimateEnvelopeBPM(envelopeHistory)
+    const envelopeBpm = estimateEnvelopeBPM(envelopeHistory, smoothedBpm)
     if (envelopeBpm) {
       const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
       const beatPresent = (now - lastOnsetTime) <= BEAT_ACTIVE_WINDOW_MS
@@ -140,6 +142,8 @@ function handleFrame(features) {
       smoothedBpm = smoothedBpm * (1 - envelopeWeight) + envelopeBpm * envelopeWeight
     }
   }
+
+  smoothedBpm = normalizeBpmToReference(smoothedBpm, smoothedBpm)
 
   callback?.({
     bpm: Math.round(smoothedBpm),
@@ -180,18 +184,25 @@ function estimateOnsetBPM(timestamps) {
   // Calculate intervals between consecutive onsets
   const intervals = []
   for (let i = 1; i < timestamps.length; i++) {
-    intervals.push(timestamps[i] - timestamps[i - 1])
+    const interval = timestamps[i] - timestamps[i - 1]
+    if (interval >= MIN_ONSET_INTERVAL_MS && interval <= MAX_ONSET_INTERVAL_MS) {
+      intervals.push(interval)
+    }
   }
+
+  if (intervals.length < 3) return null
 
   // Build a weighted histogram of BPM candidates
   const bpmCounts = {}
-  for (const interval of intervals) {
+  for (let idx = 0; idx < intervals.length; idx++) {
+    const interval = intervals[idx]
     const bpm = Math.round(60000 / interval)
+    const recencyWeight = 0.75 + (idx / intervals.length) * 0.75
     // Also count half/double time
-    for (const multiplier of [0.5, 1, 2]) {
+    for (const multiplier of [0.5, 1, 1.5, 2]) {
       const candidate = Math.round(bpm * multiplier)
       if (candidate >= MIN_BPM && candidate <= MAX_BPM) {
-        bpmCounts[candidate] = (bpmCounts[candidate] || 0) + 1
+        bpmCounts[candidate] = (bpmCounts[candidate] || 0) + recencyWeight
       }
     }
   }
@@ -208,10 +219,10 @@ function estimateOnsetBPM(timestamps) {
 
   if (!bestBpm) return null
 
-  return bestBpm
+  return normalizeBpmToReference(bestBpm, smoothedBpm)
 }
 
-function estimateEnvelopeBPM(points) {
+function estimateEnvelopeBPM(points, referenceBpm) {
   if (points.length < 32) return null
 
   const values = points.map((p) => p.e)
@@ -239,8 +250,72 @@ function estimateEnvelopeBPM(points) {
   }
 
   if (bestLag <= 0 || bestScore <= 0) return null
-  const bpm = 60000 / (bestLag * frameMs)
+  const peakBpm = pickEnvelopePeakBPM(points, frameMs, referenceBpm)
+  const bpm = peakBpm || 60000 / (bestLag * frameMs)
   if (!Number.isFinite(bpm) || bpm < MIN_BPM || bpm > MAX_BPM) return null
 
-  return bpm
+  return normalizeBpmToReference(bpm, referenceBpm)
+}
+
+function pickEnvelopePeakBPM(points, frameMs, referenceBpm) {
+  if (points.length < 32) return null
+
+  const minIntervalFrames = Math.max(1, Math.round(ENVELOPE_PEAK_MIN_INTERVAL_MS / frameMs))
+  const minPeakHeight = Math.max(0.01, smoothedEnergy * 0.9)
+  const peaks = []
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = points[i - 1].e
+    const curr = points[i].e
+    const next = points[i + 1].e
+    if (curr <= minPeakHeight || curr < prev || curr < next) continue
+
+    const lastPeak = peaks[peaks.length - 1]
+    if (!lastPeak || (i - lastPeak.index) >= minIntervalFrames) {
+      peaks.push({ index: i, t: points[i].t })
+    }
+  }
+
+  if (peaks.length < 4) return null
+
+  const intervals = []
+  for (let i = 1; i < peaks.length; i++) {
+    const dt = peaks[i].t - peaks[i - 1].t
+    if (dt >= MIN_ONSET_INTERVAL_MS && dt <= MAX_ONSET_INTERVAL_MS) {
+      intervals.push(dt)
+    }
+  }
+  if (intervals.length < 3) return null
+
+  const sorted = intervals.slice().sort((a, b) => a - b)
+  const medianInterval = sorted[Math.floor(sorted.length / 2)]
+  const bpm = 60000 / medianInterval
+  if (!Number.isFinite(bpm)) return null
+  return normalizeBpmToReference(bpm, referenceBpm)
+}
+
+function normalizeBpmToReference(bpm, referenceBpm) {
+  if (!Number.isFinite(bpm)) return null
+  if (!Number.isFinite(referenceBpm) || referenceBpm <= 0) {
+    return Math.min(MAX_BPM, Math.max(MIN_BPM, bpm))
+  }
+
+  let candidate = bpm
+  while (candidate < MIN_BPM) candidate *= 2
+  while (candidate > MAX_BPM) candidate /= 2
+
+  const variants = [candidate / 2, candidate, candidate * 2, candidate * 1.5, candidate / 1.5]
+    .filter((v) => v >= MIN_BPM && v <= MAX_BPM)
+
+  let best = candidate
+  let bestDelta = Math.abs(candidate - referenceBpm)
+  for (const variant of variants) {
+    const delta = Math.abs(variant - referenceBpm)
+    if (delta < bestDelta) {
+      best = variant
+      bestDelta = delta
+    }
+  }
+
+  return best
 }

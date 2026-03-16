@@ -157,6 +157,23 @@ const GENRE_NORMALIZATION = {
   corporate: 0.95,
 }
 
+
+
+const GENRE_BPM_RANGES = {
+  techno: { min: 124, max: 154, weight: 0.18 },
+  edm: { min: 118, max: 150, weight: 0.16 },
+  hiphop: { min: 68, max: 102, weight: 0.2 },
+  pop: { min: 92, max: 132, weight: 0.14 },
+  eighties: { min: 96, max: 130, weight: 0.15 },
+  latin: { min: 88, max: 128, weight: 0.17 },
+  rock: { min: 96, max: 156, weight: 0.12 },
+  corporate: { min: 60, max: 110, weight: 0.14 },
+}
+
+const SCORE_SMOOTHING_ALPHA = 0.38
+const CURRENT_GENRE_STICKINESS = 0.05
+const CANDIDATE_GENRE_STICKINESS = 0.03
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let essentiaModule = null
@@ -170,6 +187,7 @@ let contextWeights = {}  // Set from user's "tonight's context"
 let callback = null
 let realtimeHint = { bpm: 0, centroid: 0, energy: 0 }
 let maestLabels = null
+let smoothedGenreScores = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 1 / ALL_GENRES.length]))
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -192,6 +210,7 @@ export function startGenreDetector(audioContext, cb) {
   candidateGenre = null
   candidateCount = 0
   currentGenre = 'unknown'
+  smoothedGenreScores = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 1 / ALL_GENRES.length]))
 
   // Tap into audio via ScriptProcessor (deprecated but widely supported in Electron)
   // For production: use AudioWorklet
@@ -275,16 +294,25 @@ async function runAnalysis() {
 
 function selectGenre(scores) {
   const rawScores = normalizeScoreMap(scores)
+  const bpmAwareScores = applyBpmBias(rawScores, realtimeHint.bpm || 0)
+  const temporalScores = smoothScores(bpmAwareScores)
   const weightedScores = {}
   const confidenceThreshold = modelLoaded ? CONFIDENCE_THRESHOLD : 0.24
   const marginThreshold = modelLoaded ? GENRE_MARGIN_THRESHOLD : 0.02
 
   for (const genre of ALL_GENRES) {
     const contextWeight = contextWeights[genre] || 1.0
-    weightedScores[genre] = rawScores[genre] * contextWeight
+    weightedScores[genre] = temporalScores[genre] * contextWeight
   }
 
-  const rawSorted = Object.entries(rawScores).sort((a, b) => b[1] - a[1])
+  if (currentGenre !== 'unknown') {
+    weightedScores[currentGenre] *= (1 + CURRENT_GENRE_STICKINESS)
+  }
+  if (candidateGenre && candidateGenre !== 'unknown') {
+    weightedScores[candidateGenre] *= (1 + CANDIDATE_GENRE_STICKINESS)
+  }
+
+  const rawSorted = Object.entries(temporalScores).sort((a, b) => b[1] - a[1])
   const weightedSorted = Object.entries(weightedScores).sort((a, b) => b[1] - a[1])
 
   const [rawTopGenre = 'unknown', rawTopScore = 0] = rawSorted[0] || []
@@ -292,14 +320,13 @@ function selectGenre(scores) {
   const rawDelta = rawTopScore - rawSecondScore
 
   const weightedTopGenre = weightedSorted[0]?.[0] || rawTopGenre
-  const weightedTopScore = weightedSorted[0]?.[1] || rawTopScore
 
   let selectedGenre = rawTopGenre || 'unknown'
   if (rawTopScore < confidenceThreshold || rawDelta < marginThreshold) {
     selectedGenre = currentGenre !== 'unknown' ? currentGenre : 'unknown'
   } else if (weightedTopGenre !== rawTopGenre) {
-    const weightedAltRaw = rawScores[weightedTopGenre] || 0
-    const closeRaw = Math.abs(rawTopScore - weightedAltRaw) <= marginThreshold
+    const weightedAltRaw = temporalScores[weightedTopGenre] || 0
+    const closeRaw = Math.abs(rawTopScore - weightedAltRaw) <= marginThreshold * 1.4
     if (closeRaw) selectedGenre = weightedTopGenre
   }
 
@@ -311,12 +338,39 @@ function selectGenre(scores) {
 
   return {
     genre: selectedGenre,
-    rawConfidence: rawScores[selectedGenre] || 0,
+    rawConfidence: temporalScores[selectedGenre] || 0,
     weightedConfidence: weightedScores[selectedGenre] || 0,
-    rawScores,
+    rawScores: temporalScores,
     weightedScores,
     topGenres,
   }
+}
+
+function smoothScores(scores) {
+  const next = {}
+  for (const genre of ALL_GENRES) {
+    const prev = smoothedGenreScores[genre] || 0
+    const curr = scores[genre] || 0
+    next[genre] = prev * (1 - SCORE_SMOOTHING_ALPHA) + curr * SCORE_SMOOTHING_ALPHA
+  }
+  smoothedGenreScores = normalizeScoreMap(next)
+  return smoothedGenreScores
+}
+
+function applyBpmBias(scoreMap, bpm) {
+  if (!Number.isFinite(bpm) || bpm <= 0) return scoreMap
+  const biased = { ...scoreMap }
+  for (const genre of ALL_GENRES) {
+    const profile = GENRE_BPM_RANGES[genre]
+    if (!profile) continue
+    const center = (profile.min + profile.max) / 2
+    const width = Math.max(1, (profile.max - profile.min) / 2)
+    const distance = Math.abs(bpm - center)
+    const gaussian = Math.exp(-0.5 * Math.pow(distance / width, 2))
+    const multiplier = 1 + gaussian * profile.weight
+    biased[genre] *= multiplier
+  }
+  return normalizeScoreMap(biased)
 }
 
 // ── Essentia.js Model (loads asynchronously) ──────────────────────────────────
@@ -430,18 +484,25 @@ function mapEssentiaToGenres(predictions) {
   const scores = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 0]))
   const hitCounts = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 0]))
 
-  for (const [label, score] of predictions) {
+  const sortedPredictions = predictions
+    .filter(([, score]) => Number.isFinite(score))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 120)
+
+  for (let i = 0; i < sortedPredictions.length; i++) {
+    const [label, score] = sortedPredictions[i]
     const mappedGenre = DISCOS_LABEL_TO_GENRE[normalizeLabel(label)]
     if (!mappedGenre) continue
-    scores[mappedGenre] += score
-    hitCounts[mappedGenre] += 1
+    const rankWeight = 1 - (i / Math.max(1, sortedPredictions.length)) * 0.55
+    scores[mappedGenre] += score * rankWeight
+    hitCounts[mappedGenre] += rankWeight
   }
 
   for (const genre of ALL_GENRES) {
     const hits = Math.max(1, hitCounts[genre])
     const prior = GENRE_PRIORS[genre] ?? 1.0
     const norm = GENRE_NORMALIZATION[genre] ?? 1.0
-    scores[genre] = (scores[genre] * prior) / (hits * norm)
+    scores[genre] = (scores[genre] * prior) / (Math.sqrt(hits) * norm)
   }
 
   return normalizeScoreMap(scores)
