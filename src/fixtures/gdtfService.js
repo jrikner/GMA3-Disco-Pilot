@@ -70,6 +70,11 @@ function normalizeText(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+
+function sanitizeQuery(value) {
+  return String(value || '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 function buildSearchKey(params) {
   return JSON.stringify({
     query: normalizeText(params.query),
@@ -199,18 +204,64 @@ function suggestFixtureType(profile, capabilities) {
   return 'Other'
 }
 
+async function fetchFromProvider(url) {
+  const payload = await fetchJson(url)
+  return normalizeSearchResults(payload)
+}
+
+function normalizeGdtfShareResults(payload) {
+  const list = Array.isArray(payload)
+    ? payload
+    : payload?.results || payload?.fixtures || payload?.data || []
+
+  if (!Array.isArray(list)) return []
+
+  return list.map((item, index) => {
+    const manufacturer = item.manufacturer || item.brand || item.company || item.vendor || 'Unknown'
+    const model = item.model || item.name || item.fixtureName || item.fixture || `Fixture ${index + 1}`
+    const fixtureType = item.fixtureType || item.type || item.category || 'Other'
+    return {
+      id: `gdtf-share:${encodeURIComponent(manufacturer)}/${encodeURIComponent(model)}`,
+      manufacturer,
+      model,
+      modes: item.modes || [],
+      raw: { ...item, fixtureType },
+      source: 'gdtf-share',
+    }
+  })
+}
+
 async function fetchSearchFromProviders(query) {
   const encoded = encodeURIComponent(query)
-  const providers = [
-    `https://open-fixture-library.org/api/v1/search?query=${encoded}`,
+  const sanitized = encodeURIComponent(sanitizeQuery(query))
+
+  const oflProviders = [
     `https://open-fixture-library.org/api/v1/get-search-results?query=${encoded}`,
+    `https://open-fixture-library.org/api/v1/search?query=${encoded}`,
+    `https://open-fixture-library.org/api/v1/get-search-results?query=${sanitized}`,
+  ]
+
+  const gdtfShareProviders = [
+    `https://gdtf-share.com/apis/public/getList.php?search=${encoded}`,
+    `https://gdtf-share.com/apis/public/getFixtures.php?search=${encoded}`,
+    `https://gdtf-share.com/api/public/fixtures?search=${encoded}`,
   ]
 
   const errors = []
-  for (const url of providers) {
+
+  for (const url of oflProviders) {
+    try {
+      const normalized = await fetchFromProvider(url)
+      if (normalized.length > 0) return normalized
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+
+  for (const url of gdtfShareProviders) {
     try {
       const payload = await fetchJson(url)
-      const normalized = normalizeSearchResults(payload)
+      const normalized = normalizeGdtfShareResults(payload)
       if (normalized.length > 0) return normalized
     } catch (error) {
       errors.push(error)
@@ -229,7 +280,7 @@ export async function searchFixtureDefinitions(params = {}) {
     return cached.data
   }
 
-  const query = params.query || `${params.manufacturer || ''} ${params.model || ''}`.trim()
+  const query = sanitizeQuery(params.query || `${params.manufacturer || ''} ${params.model || ''}`.trim())
   if (!query) return []
 
   try {
@@ -244,7 +295,21 @@ export async function searchFixtureDefinitions(params = {}) {
   }
 }
 
-async function fetchProfileDetailById(profileId) {
+async function fetchProfileDetailById(profileId, profileSummary = null) {
+  if (String(profileId).startsWith('gdtf-share:')) {
+    const parsed = String(profileId).replace('gdtf-share:', '').split('/')
+    const manufacturer = decodeURIComponent(parsed[0] || profileSummary?.manufacturer || 'Unknown')
+    const model = decodeURIComponent(parsed[1] || profileSummary?.model || 'Fixture')
+    return {
+      id: profileId,
+      manufacturer,
+      model,
+      categories: [profileSummary?.raw?.fixtureType || 'Other'],
+      modes: profileSummary?.modes || [],
+      raw: profileSummary?.raw || {},
+    }
+  }
+
   const [manufacturerKey, fixtureKey] = String(profileId).split('/')
   if (!manufacturerKey || !fixtureKey) {
     throw new Error('Unsupported fixture profile id format')
@@ -278,7 +343,7 @@ export async function getFixtureProfile(profileSummary, selectedModeName) {
     detail = cached.data
   } else {
     try {
-      detail = await fetchProfileDetailById(profileSummary.id)
+      detail = await fetchProfileDetailById(profileSummary.id, profileSummary)
       const entry = { data: detail, expiresAt: Date.now() + CACHE_TTL_MS }
       detailCache.set(cacheKey, entry)
       persistCache(PROFILE_CACHE_KEY, detailCache)
