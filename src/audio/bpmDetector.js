@@ -2,41 +2,71 @@
  * Real-time BPM + energy detector using Meyda
  *
  * Features extracted every ~93ms (bufferSize 4096 @ 44100Hz):
- * - rms           → energy/loudness
- * - energy        → frame energy
+ * - rms              → energy/loudness
+ * - energy           → frame energy
  * - spectralCentroid → brightness (higher = more treble-heavy)
- * - zcr           → zero crossing rate (transient density)
- * - loudness      → perceptual loudness bands
+ * - zcr              → zero crossing rate (transient density)
+ * - spectralFlux     → frame-to-frame spectral change (onset detection)
+ * - amplitudeSpectrum → per-bin magnitudes (multi-band energy)
  *
- * Beat tracking: onset detection → interval histogram → BPM estimate
+ * Beat tracking improvements:
+ * - Spectral flux onset detection (much better than energy-only thresholds)
+ * - Multi-band energy analysis (low/mid/high) for kick-drum detection
+ * - Clustered BPM histogram (kernel-style grouping instead of integer bins)
+ * - Low-frequency energy ratio for half/double-time disambiguation
+ * - Median filtering + EMA for stable BPM output
  */
 
 import Meyda from 'meyda'
 
 const BUFFER_SIZE = 4096
-const BEAT_HISTORY_MAX = 60         // Keep last N beat intervals
+const SAMPLE_RATE = 44100
+const BEAT_HISTORY_MAX = 90         // Increased from 60 for more stable estimates
 const MIN_BPM = 60
 const MAX_BPM = 200
 const SILENCE_THRESHOLD = 0.005     // RMS below this = silence
-const BPM_RESYNC_WINDOW_MS = 10000
-const ENVELOPE_WINDOW_MS = 12000
-const TEMPO_ESTIMATE_INTERVAL_MS = 1000
+const BPM_RESYNC_WINDOW_MS = 12000  // Increased from 10s for more history
+const ENVELOPE_WINDOW_MS = 14000    // Increased from 12s
+const TEMPO_ESTIMATE_INTERVAL_MS = 800  // More frequent envelope estimates
 const BEAT_ACTIVE_WINDOW_MS = 1400
-const BPM_LOCK_TOLERANCE = 6
-const BPM_LOCK_HARD_TOLERANCE = 12
+const BPM_LOCK_TOLERANCE = 5       // Tighter lock tolerance
+const BPM_LOCK_HARD_TOLERANCE = 10
 const MIN_ONSET_INTERVAL_MS = 170
 const MAX_ONSET_INTERVAL_MS = 1200
 const ENVELOPE_PEAK_MIN_INTERVAL_MS = 180
 
+// Spectral flux onset detection thresholds
+const FLUX_ONSET_THRESHOLD = 1.6     // Flux must exceed smoothed flux by this multiplier
+const ENERGY_ONSET_THRESHOLD = 1.2   // Energy must exceed smoothed energy by this (lower than before since flux is primary)
+const LOW_BAND_ONSET_THRESHOLD = 1.5 // Low-band energy spike threshold for kick detection
+
+// Multi-band frequency boundaries (bin indices at 44100Hz/4096 FFT)
+const LOW_BAND_MAX_HZ = 300
+const MID_BAND_MAX_HZ = 2000
+const LOW_BAND_MAX_BIN = Math.round(LOW_BAND_MAX_HZ / (SAMPLE_RATE / BUFFER_SIZE))
+const MID_BAND_MAX_BIN = Math.round(MID_BAND_MAX_HZ / (SAMPLE_RATE / BUFFER_SIZE))
+
+// BPM histogram clustering
+const BPM_CLUSTER_RADIUS = 2  // Group BPM candidates within ±2 BPM
+
+// Median filter for BPM stability
+const MEDIAN_HISTORY_SIZE = 7
+const BPM_MEDIAN_WEIGHT = 0.3  // Blend median estimate into final output
+
 let analyzer = null
 let onsetHistory = []               // timestamps of detected onsets
+let onsetEnergies = []              // { t, lowEnergy } for half/double-time analysis
 let envelopeHistory = []            // { t, e } envelope samples
 let lastOnsetTime = 0
 let smoothedBpm = 120
 let smoothedEnergy = 0
 let smoothedCentroid = 0
+let smoothedFlux = 0                // EMA of spectral flux
+let smoothedLowBand = 0            // EMA of low-band energy
+let smoothedMidBand = 0            // EMA of mid-band energy
 let silenceFrames = 0
 let lastTempoEstimate = 0
+let bpmMedianHistory = []           // Recent BPM estimates for median filtering
 const SILENCE_FRAMES_THRESHOLD = 30 // ~3 seconds of silence
 
 let callback = null
@@ -44,6 +74,7 @@ let callback = null
 export function startBPMDetector(audioContext, sourceNode, cb) {
   callback = cb
   onsetHistory = []
+  onsetEnergies = []
   envelopeHistory = []
   silenceFrames = 0
   lastOnsetTime = 0
@@ -51,12 +82,16 @@ export function startBPMDetector(audioContext, sourceNode, cb) {
   smoothedBpm = 120
   smoothedEnergy = 0
   smoothedCentroid = 0
+  smoothedFlux = 0
+  smoothedLowBand = 0
+  smoothedMidBand = 0
+  bpmMedianHistory = []
 
   analyzer = Meyda.createMeydaAnalyzer({
     audioContext,
     source: sourceNode,
     bufferSize: BUFFER_SIZE,
-    featureExtractors: ['rms', 'energy', 'spectralCentroid', 'zcr'],
+    featureExtractors: ['rms', 'energy', 'spectralCentroid', 'zcr', 'spectralFlux', 'amplitudeSpectrum'],
     callback: handleFrame,
   })
 
@@ -69,18 +104,52 @@ export function stopBPMDetector() {
     analyzer = null
   }
   onsetHistory = []
+  onsetEnergies = []
   envelopeHistory = []
   silenceFrames = 0
   lastOnsetTime = 0
   lastTempoEstimate = 0
+  bpmMedianHistory = []
   callback = null
+}
+
+function computeBandEnergies(amplitudeSpectrum) {
+  if (!amplitudeSpectrum || amplitudeSpectrum.length === 0) {
+    return { low: 0, mid: 0, high: 0 }
+  }
+
+  let low = 0
+  let mid = 0
+  let high = 0
+  const len = amplitudeSpectrum.length
+
+  for (let i = 0; i < len; i++) {
+    const mag = amplitudeSpectrum[i] * amplitudeSpectrum[i]  // energy = magnitude^2
+    if (i <= LOW_BAND_MAX_BIN) {
+      low += mag
+    } else if (i <= MID_BAND_MAX_BIN) {
+      mid += mag
+    } else {
+      high += mag
+    }
+  }
+
+  return {
+    low: Math.sqrt(low / Math.max(1, LOW_BAND_MAX_BIN)),
+    mid: Math.sqrt(mid / Math.max(1, MID_BAND_MAX_BIN - LOW_BAND_MAX_BIN)),
+    high: Math.sqrt(high / Math.max(1, len - MID_BAND_MAX_BIN)),
+  }
 }
 
 function handleFrame(features) {
   if (!features) return
 
-  const { rms, spectralCentroid, zcr } = features
+  const { rms, spectralCentroid, zcr, spectralFlux, amplitudeSpectrum } = features
   const now = performance.now()
+  const flux = spectralFlux || 0
+
+  // Compute multi-band energies
+  const bands = computeBandEnergies(amplitudeSpectrum)
 
   // Silence detection
   if (rms < SILENCE_THRESHOLD) {
@@ -91,22 +160,41 @@ function handleFrame(features) {
 
   const isSilent = silenceFrames > SILENCE_FRAMES_THRESHOLD
 
-  // Smooth energy (exponential moving average)
+  // Smooth features (exponential moving average)
   smoothedEnergy = smoothedEnergy * 0.85 + (rms || 0) * 0.15
   smoothedCentroid = smoothedCentroid * 0.9 + (spectralCentroid || 5000) * 0.1
+  smoothedFlux = smoothedFlux * 0.82 + flux * 0.18
+  smoothedLowBand = smoothedLowBand * 0.85 + bands.low * 0.15
+  smoothedMidBand = smoothedMidBand * 0.85 + bands.mid * 0.15
 
   // Keep an energy envelope history for autocorrelation tempo estimation.
-  envelopeHistory.push({ t: now, e: smoothedEnergy })
+  envelopeHistory.push({ t: now, e: smoothedEnergy, low: bands.low })
   envelopeHistory = envelopeHistory.filter((p) => (now - p.t) <= ENVELOPE_WINDOW_MS)
 
-  // Onset detection: significant energy spike = beat candidate
-  if (!isSilent && rms > smoothedEnergy * 1.35 && (now - lastOnsetTime) > MIN_ONSET_INTERVAL_MS) {
+  // ── Onset detection ─────────────────────────────────────────────────
+  // Dual-gate: spectral flux (primary) + energy (secondary)
+  // Also check low-band energy for kick drum detection
+  const fluxOnset = flux > smoothedFlux * FLUX_ONSET_THRESHOLD && smoothedFlux > 0.001
+  const energyOnset = rms > smoothedEnergy * ENERGY_ONSET_THRESHOLD
+  const lowBandOnset = bands.low > smoothedLowBand * LOW_BAND_ONSET_THRESHOLD && smoothedLowBand > 0.001
+  const isOnset = !isSilent
+    && (now - lastOnsetTime) > MIN_ONSET_INTERVAL_MS
+    && ((fluxOnset && energyOnset) || (lowBandOnset && energyOnset))
+
+  if (isOnset) {
     lastOnsetTime = now
     onsetHistory.push(now)
     onsetHistory = onsetHistory.filter(ts => (now - ts) <= BPM_RESYNC_WINDOW_MS)
     if (onsetHistory.length > BEAT_HISTORY_MAX) {
       onsetHistory.shift()
     }
+
+    // Track low-band energy at onset for half/double-time analysis
+    onsetEnergies.push({ t: now, lowEnergy: bands.low })
+    if (onsetEnergies.length > BEAT_HISTORY_MAX) {
+      onsetEnergies.shift()
+    }
+
     const onsetBpm = estimateOnsetBPM(onsetHistory, smoothedBpm)
     if (onsetBpm) {
       const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
@@ -115,7 +203,7 @@ function handleFrame(features) {
 
       let onsetWeight = 0.25
       if (beatPresent && beatLockStrength > 0.7) {
-        onsetWeight = delta <= BPM_LOCK_TOLERANCE ? 0.12 : 0.03
+        onsetWeight = delta <= BPM_LOCK_TOLERANCE ? 0.10 : 0.03
       } else if (beatLockStrength > 0.45 && delta > BPM_LOCK_HARD_TOLERANCE) {
         onsetWeight = 0.08
       }
@@ -124,6 +212,7 @@ function handleFrame(features) {
     }
   }
 
+  // ── Envelope-based tempo estimate ───────────────────────────────────
   if (!isSilent && (now - lastTempoEstimate) >= TEMPO_ESTIMATE_INTERVAL_MS) {
     lastTempoEstimate = now
     const envelopeBpm = estimateEnvelopeBPM(envelopeHistory, smoothedBpm)
@@ -132,11 +221,11 @@ function handleFrame(features) {
       const beatPresent = (now - lastOnsetTime) <= BEAT_ACTIVE_WINDOW_MS
       const delta = Math.abs(envelopeBpm - smoothedBpm)
 
-      let envelopeWeight = 0.3
+      let envelopeWeight = 0.25
       if (beatPresent && beatLockStrength > 0.7) {
-        envelopeWeight = delta <= BPM_LOCK_TOLERANCE ? 0.08 : 0.02
+        envelopeWeight = delta <= BPM_LOCK_TOLERANCE ? 0.06 : 0.02
       } else if (beatLockStrength > 0.45 && delta > BPM_LOCK_HARD_TOLERANCE) {
-        envelopeWeight = 0.1
+        envelopeWeight = 0.08
       }
 
       smoothedBpm = smoothedBpm * (1 - envelopeWeight) + envelopeBpm * envelopeWeight
@@ -145,14 +234,32 @@ function handleFrame(features) {
 
   smoothedBpm = normalizeBpmToReference(smoothedBpm, smoothedBpm)
 
+  // ── Median filtering for stability ──────────────────────────────────
+  const rawBpm = Math.round(smoothedBpm)
+  bpmMedianHistory.push(rawBpm)
+  if (bpmMedianHistory.length > MEDIAN_HISTORY_SIZE) {
+    bpmMedianHistory.shift()
+  }
+  const medianBpm = getMedian(bpmMedianHistory)
+  // Blend: mostly EMA, with median stabilizer
+  const finalBpm = Math.round(smoothedBpm * (1 - BPM_MEDIAN_WEIGHT) + medianBpm * BPM_MEDIAN_WEIGHT)
+
   callback?.({
-    bpm: Math.round(smoothedBpm),
+    bpm: finalBpm,
     energy: smoothedEnergy,
     spectralCentroid: smoothedCentroid,
     rms: rms || 0,
     zcr: zcr || 0,
+    lowBandEnergy: bands.low,
     isSilent,
   })
+}
+
+function getMedian(arr) {
+  if (arr.length === 0) return 0
+  const sorted = arr.slice().sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
 function estimateBeatLockStrength(timestamps, referenceBpm) {
@@ -172,7 +279,7 @@ function estimateBeatLockStrength(timestamps, referenceBpm) {
       Math.abs(interval - expectedInterval * 0.5),
       Math.abs(interval - expectedInterval * 2),
     )
-    if (closest <= 45) coherent++
+    if (closest <= 40) coherent++  // Tightened from 45ms
   }
 
   return coherent / intervals.length
@@ -192,34 +299,109 @@ function estimateOnsetBPM(timestamps) {
 
   if (intervals.length < 3) return null
 
-  // Build a weighted histogram of BPM candidates
-  const bpmCounts = {}
+  // Build clustered BPM histogram (group candidates within ±BPM_CLUSTER_RADIUS)
+  const candidates = []
   for (let idx = 0; idx < intervals.length; idx++) {
     const interval = intervals[idx]
-    const bpm = Math.round(60000 / interval)
-    const recencyWeight = 0.75 + (idx / intervals.length) * 0.75
-    // Also count half/double time
-    for (const multiplier of [0.5, 1, 1.5, 2]) {
-      const candidate = Math.round(bpm * multiplier)
+    const bpm = 60000 / interval
+    const recencyWeight = 0.7 + (idx / intervals.length) * 0.8
+
+    // Add base BPM and harmonic variants (half/double time)
+    for (const multiplier of [0.5, 1, 2]) {
+      const candidate = bpm * multiplier
       if (candidate >= MIN_BPM && candidate <= MAX_BPM) {
-        bpmCounts[candidate] = (bpmCounts[candidate] || 0) + recencyWeight
+        candidates.push({ bpm: candidate, weight: recencyWeight * (multiplier === 1 ? 1.0 : 0.6) })
       }
     }
   }
 
-  // Find the most common BPM candidate
-  let bestBpm = null
-  let bestCount = 0
-  for (const [bpm, count] of Object.entries(bpmCounts)) {
-    if (count > bestCount) {
-      bestCount = count
-      bestBpm = parseInt(bpm)
+  if (candidates.length === 0) return null
+
+  // Cluster nearby BPM values instead of rounding to integers
+  const clusters = []
+  for (const c of candidates) {
+    let foundCluster = false
+    for (const cluster of clusters) {
+      if (Math.abs(c.bpm - cluster.center) <= BPM_CLUSTER_RADIUS) {
+        // Weighted update of cluster center
+        const totalWeight = cluster.weight + c.weight
+        cluster.center = (cluster.center * cluster.weight + c.bpm * c.weight) / totalWeight
+        cluster.weight = totalWeight
+        foundCluster = true
+        break
+      }
+    }
+    if (!foundCluster) {
+      clusters.push({ center: c.bpm, weight: c.weight })
     }
   }
 
-  if (!bestBpm) return null
+  // Find best cluster
+  let bestCluster = null
+  let bestWeight = 0
+  for (const cluster of clusters) {
+    if (cluster.weight > bestWeight) {
+      bestWeight = cluster.weight
+      bestCluster = cluster
+    }
+  }
 
-  return normalizeBpmToReference(bestBpm, smoothedBpm)
+  if (!bestCluster) return null
+
+  // Apply half/double-time disambiguation using low-frequency energy
+  const disambiguated = disambiguateHalfDouble(bestCluster.center)
+  return normalizeBpmToReference(disambiguated, smoothedBpm)
+}
+
+/**
+ * Uses low-frequency energy patterns to disambiguate half-time vs double-time.
+ * If alternating onsets have significantly different low-band energy (strong/weak pattern),
+ * this suggests the "strong" beats are the true downbeats and the tempo should be halved.
+ */
+function disambiguateHalfDouble(bpm) {
+  if (onsetEnergies.length < 8) return bpm
+
+  // Check for strong/weak alternating pattern in recent onsets
+  const recent = onsetEnergies.slice(-16)
+  let evenSum = 0
+  let oddSum = 0
+  let evenCount = 0
+  let oddCount = 0
+
+  for (let i = 0; i < recent.length; i++) {
+    if (i % 2 === 0) {
+      evenSum += recent[i].lowEnergy
+      evenCount++
+    } else {
+      oddSum += recent[i].lowEnergy
+      oddCount++
+    }
+  }
+
+  if (evenCount === 0 || oddCount === 0) return bpm
+
+  const evenAvg = evenSum / evenCount
+  const oddAvg = oddSum / oddCount
+  const ratio = Math.max(evenAvg, oddAvg) / Math.max(0.001, Math.min(evenAvg, oddAvg))
+
+  // Strong alternating pattern (>1.8x energy difference) suggests half-time
+  // but only apply if halved BPM is still in valid range
+  if (ratio > 1.8) {
+    const halved = bpm / 2
+    if (halved >= MIN_BPM && halved <= MAX_BPM) {
+      return halved
+    }
+  }
+
+  // If BPM is very high and doubling pattern exists, consider if it should be halved
+  if (bpm > 155 && ratio > 1.3) {
+    const halved = bpm / 2
+    if (halved >= MIN_BPM) {
+      return halved
+    }
+  }
+
+  return bpm
 }
 
 function estimateEnvelopeBPM(points, referenceBpm) {
@@ -235,6 +417,13 @@ function estimateEnvelopeBPM(points, referenceBpm) {
   const minLag = Math.max(1, Math.round((60000 / MAX_BPM) / frameMs))
   const maxLag = Math.max(minLag + 1, Math.round((60000 / MIN_BPM) / frameMs))
 
+  // Normalized autocorrelation for better peak detection
+  let energy = 0
+  for (let i = 0; i < centered.length; i++) {
+    energy += centered[i] * centered[i]
+  }
+  if (energy <= 0) return null
+
   let bestLag = 0
   let bestScore = -Infinity
 
@@ -243,6 +432,7 @@ function estimateEnvelopeBPM(points, referenceBpm) {
     for (let i = lag; i < centered.length; i++) {
       score += centered[i] * centered[i - lag]
     }
+    score /= energy  // Normalize
     if (score > bestScore) {
       bestScore = score
       bestLag = lag
@@ -250,8 +440,38 @@ function estimateEnvelopeBPM(points, referenceBpm) {
   }
 
   if (bestLag <= 0 || bestScore <= 0) return null
+
+  // Also try low-band autocorrelation for better kick-drum tracking
+  const lowValues = points.map((p) => p.low || 0)
+  const lowMean = lowValues.reduce((sum, v) => sum + v, 0) / lowValues.length
+  const lowCentered = lowValues.map((v) => v - lowMean)
+  let lowEnergy = 0
+  for (let i = 0; i < lowCentered.length; i++) {
+    lowEnergy += lowCentered[i] * lowCentered[i]
+  }
+
+  let lowBestLag = 0
+  let lowBestScore = -Infinity
+  if (lowEnergy > 0) {
+    for (let lag = minLag; lag <= maxLag; lag++) {
+      let score = 0
+      for (let i = lag; i < lowCentered.length; i++) {
+        score += lowCentered[i] * lowCentered[i - lag]
+      }
+      score /= lowEnergy
+      if (score > lowBestScore) {
+        lowBestScore = score
+        lowBestLag = lag
+      }
+    }
+  }
+
+  // Prefer low-band autocorrelation if it has a strong peak (indicates clear kick pattern)
+  const useLow = lowBestScore > 0.3 && lowBestLag > 0
+  const selectedLag = useLow ? lowBestLag : bestLag
+
   const peakBpm = pickEnvelopePeakBPM(points, frameMs, referenceBpm)
-  const bpm = peakBpm || 60000 / (bestLag * frameMs)
+  const bpm = peakBpm || 60000 / (selectedLag * frameMs)
   if (!Number.isFinite(bpm) || bpm < MIN_BPM || bpm > MAX_BPM) return null
 
   return normalizeBpmToReference(bpm, referenceBpm)
@@ -304,7 +524,9 @@ function normalizeBpmToReference(bpm, referenceBpm) {
   while (candidate < MIN_BPM) candidate *= 2
   while (candidate > MAX_BPM) candidate /= 2
 
-  const variants = [candidate / 2, candidate, candidate * 2, candidate * 1.5, candidate / 1.5]
+  // Only consider musically meaningful ratios (half, same, double)
+  // Removed 1.5x and /1.5 which caused false matches
+  const variants = [candidate / 2, candidate, candidate * 2]
     .filter((v) => v >= MIN_BPM && v <= MAX_BPM)
 
   let best = candidate
