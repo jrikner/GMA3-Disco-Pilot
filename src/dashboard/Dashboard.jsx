@@ -109,7 +109,12 @@ export default function Dashboard() {
           rms: frame.rms,
           isSilent: frame.isSilent,
         })
-        setGenreRealtimeHint({ bpm: frame.bpm, centroid: frame.spectralCentroid, energy: frame.energy })
+        setGenreRealtimeHint({
+          bpm: frame.bpm ?? 0,
+          centroid: frame.spectralCentroid ?? 0,
+          energy: frame.energy ?? 0,
+          lowBandEnergy: frame.lowBandEnergy ?? 0,
+        })
         profileMapper.onAudioFrame(frame)
       })
 
@@ -127,7 +132,6 @@ export default function Dashboard() {
 
       if (genreProcessor) {
         sourceNode.connect(genreProcessor)
-        genreProcessor.connect(audioContext.destination)
         genreProcessorRef.current = genreProcessor
       }
 

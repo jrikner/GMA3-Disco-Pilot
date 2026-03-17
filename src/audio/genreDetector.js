@@ -995,8 +995,14 @@ async function loadEssentia() {
     }
     essentiaModule = await EssentiaModule.default()
     maestLabels = await loadMaestLabels()
-    modelLoaded = true
-    console.log('[GenreDetector] Essentia.js loaded successfully', maestLabels?.length ? `(labels: ${maestLabels.length})` : '(labels unavailable)')
+    modelLoaded = Boolean(essentiaModule && maestLabels?.length)
+
+    if (!modelLoaded) {
+      console.warn('[GenreDetector] Essentia loaded but MAEST labels are missing or incompatible with prediction output format; enabling spectral heuristic fallback.')
+      return
+    }
+
+    console.log('[GenreDetector] Essentia.js loaded successfully', `(labels: ${maestLabels.length})`)
   } catch (err) {
     console.warn('[GenreDetector] Could not load Essentia.js:', err.message)
   }
@@ -1031,6 +1037,10 @@ async function runEssentiaModel(samples) {
     // Model inference (requires loaded TF.js model)
     // This is a simplified call — actual Essentia.js API varies by version
     const predictions = await predictMaest(essentia, features)
+    if (!predictions.length) {
+      console.warn('[GenreDetector] MAEST prediction parsing produced no label/score pairs; falling back to spectral heuristic.')
+      return spectralHeuristic(samples)
+    }
 
     return mapEssentiaToGenres(predictions)
   } catch (err) {
@@ -1079,6 +1089,10 @@ function parsePredictionOutput(predictions) {
       .filter(([label, score]) => typeof label === 'string' && Number.isFinite(score))
 
     if (withLabelScore.length) return withLabelScore
+  }
+
+  if (!maestLabels?.length) {
+    console.warn('[GenreDetector] Unable to parse MAEST numeric predictions because labels are unavailable; using fallback path.')
   }
 
   return []
