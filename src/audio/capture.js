@@ -6,6 +6,8 @@
 let audioContext = null
 let micStream = null
 let sourceNode = null
+let silentMonitorNode = null
+let currentDeviceId = null
 
 export async function listAudioDevices() {
   const devices = await navigator.mediaDevices.enumerateDevices()
@@ -13,6 +15,10 @@ export async function listAudioDevices() {
 }
 
 export async function startCapture(deviceId = null) {
+  if (audioContext && sourceNode && currentDeviceId !== deviceId) {
+    await stopCapture()
+  }
+
   if (audioContext && sourceNode) {
     if (audioContext.state === 'suspended') {
       await audioContext.resume()
@@ -50,6 +56,14 @@ export async function startCapture(deviceId = null) {
     await audioContext.resume()
   }
   sourceNode = audioContext.createMediaStreamSource(stream)
+  currentDeviceId = deviceId
+
+  // Keep the graph alive while remaining silent in local monitors.
+  // Some browsers/drivers only run analyzers when an output path exists.
+  silentMonitorNode = audioContext.createGain()
+  silentMonitorNode.gain.value = 0
+  sourceNode.connect(silentMonitorNode)
+  silentMonitorNode.connect(audioContext.destination)
 
   return { audioContext, sourceNode }
 }
@@ -63,6 +77,8 @@ export async function stopCapture() {
     await audioContext.close()
     audioContext = null
     sourceNode = null
+    silentMonitorNode = null
+    currentDeviceId = null
   }
 }
 

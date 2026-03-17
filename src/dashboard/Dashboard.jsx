@@ -93,7 +93,7 @@ export default function Dashboard() {
   }, [])
 
   async function startAudio(deviceId = audioDeviceId) {
-    if (live.isCapturing) return
+    if (isStarting) return
     setIsStarting(true)
     try {
       const { audioContext, sourceNode } = await startCapture(deviceId)
