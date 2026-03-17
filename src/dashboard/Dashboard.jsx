@@ -92,11 +92,11 @@ export default function Dashboard() {
     return () => stopAudio()
   }, [])
 
-  async function startAudio() {
+  async function startAudio(deviceId = audioDeviceId) {
     if (live.isCapturing) return
     setIsStarting(true)
     try {
-      const { audioContext, sourceNode } = await startCapture(audioDeviceId)
+      const { audioContext, sourceNode } = await startCapture(deviceId)
 
       await initGenreDetector(liveContexts)
 
@@ -468,9 +468,10 @@ export default function Dashboard() {
               }}
               value={audioDeviceId || ''}
               onChange={async (e) => {
-                setAudioDeviceId(e.target.value || null)
+                const selectedDeviceId = e.target.value || null
+                setAudioDeviceId(selectedDeviceId)
                 await stopAudio()
-                await startAudio()
+                await startAudio(selectedDeviceId)
               }}
             >
               <option value="">Default</option>

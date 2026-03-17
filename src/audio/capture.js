@@ -13,22 +13,42 @@ export async function listAudioDevices() {
 }
 
 export async function startCapture(deviceId = null) {
-  if (audioContext) return { audioContext, sourceNode }
+  if (audioContext && sourceNode) {
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume()
+    }
+    return { audioContext, sourceNode }
+  }
 
-  const audioConstraints = {
+  const strictConstraints = {
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false,
     sampleRate: 44100,
   }
-  if (deviceId) audioConstraints.deviceId = { exact: deviceId }
+  if (deviceId) strictConstraints.deviceId = { exact: deviceId }
 
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: audioConstraints,
-  })
+  // Some drivers reject strict sample-rate/device constraints. Retry with a
+  // relaxed constraint set so we still get a usable input stream.
+  const relaxedConstraints = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+  }
+  if (deviceId) relaxedConstraints.deviceId = { exact: deviceId }
+
+  let stream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: strictConstraints })
+  } catch {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: relaxedConstraints })
+  }
 
   micStream = stream
-  audioContext = new AudioContext({ sampleRate: 44100 })
+  audioContext = new AudioContext()
+  if (audioContext.state === 'suspended') {
+    await audioContext.resume()
+  }
   sourceNode = audioContext.createMediaStreamSource(stream)
 
   return { audioContext, sourceNode }
