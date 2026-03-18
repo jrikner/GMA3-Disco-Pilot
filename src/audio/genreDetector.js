@@ -764,6 +764,8 @@ let callback = null
 let realtimeHint = { bpm: 0, centroid: 0, energy: 0, lowBandEnergy: 0 }
 let maestLabels = null
 let smoothedGenreScores = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 1 / ALL_GENRES.length]))
+let processorNode = null
+let silentSinkNode = null
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -791,6 +793,12 @@ export function startGenreDetector(audioContext, cb) {
   // Tap into audio via ScriptProcessor (deprecated but widely supported in Electron)
   // For production: use AudioWorklet
   const processor = audioContext.createScriptProcessor(4096, 1, 1)
+  // ScriptProcessor nodes only receive callbacks when their output is part of
+  // the graph. Route to a muted gain node so we keep processing without
+  // sending monitor audio to speakers.
+  const silentSink = audioContext.createGain()
+  silentSink.gain.value = 0
+
   processor.onaudioprocess = (e) => {
     const samples = normalizeMonoSamples(e.inputBuffer.getChannelData(0))
     audioBuffer.push(...samples)
@@ -800,6 +808,11 @@ export function startGenreDetector(audioContext, cb) {
       audioBuffer = audioBuffer.slice(audioBuffer.length - maxSamples)
     }
   }
+
+  processor.connect(silentSink)
+  silentSink.connect(audioContext.destination)
+  processorNode = processor
+  silentSinkNode = silentSink
 
   analysisInterval = setInterval(() => runAnalysis(), ANALYSIS_INTERVAL_MS)
 
@@ -812,6 +825,15 @@ export function stopGenreDetector() {
     analysisInterval = null
   }
   audioBuffer = []
+  if (processorNode) {
+    processorNode.disconnect()
+    processorNode.onaudioprocess = null
+    processorNode = null
+  }
+  if (silentSinkNode) {
+    silentSinkNode.disconnect()
+    silentSinkNode = null
+  }
   callback = null
 }
 
