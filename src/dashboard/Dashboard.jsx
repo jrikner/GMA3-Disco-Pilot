@@ -128,7 +128,7 @@ export default function Dashboard() {
         profileMapper.onAudioFrame(frame)
       })
 
-      const genreProcessor = startGenreDetector(audioContext, (result) => {
+      const genreProcessor = await startGenreDetector(audioContext, (result) => {
         if (overrides.holdFreeze) return
         const topGenres = (result.topGenres || []).slice(0, 3)
 
@@ -148,6 +148,10 @@ export default function Dashboard() {
       updateLive({ isCapturing: true, audioError: null })
     } catch (err) {
       console.error('Failed to start audio:', err)
+      genreProcessorRef.current = null
+      stopBPMDetector()
+      stopGenreDetector()
+      await stopCapture()
       updateLive({
         isCapturing: false,
         audioError: err?.message || 'Unable to start microphone capture.',
@@ -157,6 +161,7 @@ export default function Dashboard() {
   }
 
   async function stopAudio() {
+    genreProcessorRef.current = null
     stopBPMDetector()
     stopGenreDetector()
     await stopCapture()
