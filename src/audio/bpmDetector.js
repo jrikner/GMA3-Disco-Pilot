@@ -67,6 +67,7 @@ let smoothedMidBand = 0            // EMA of mid-band energy
 let silenceFrames = 0
 let lastTempoEstimate = 0
 let bpmMedianHistory = []           // Recent BPM estimates for median filtering
+let previousAmplitudeSpectrum = null // Prior spectrum for manual spectral flux calculation
 const SILENCE_FRAMES_THRESHOLD = 30 // ~3 seconds of silence
 
 let callback = null
@@ -86,12 +87,13 @@ export function startBPMDetector(audioContext, sourceNode, cb) {
   smoothedLowBand = 0
   smoothedMidBand = 0
   bpmMedianHistory = []
+  previousAmplitudeSpectrum = null
 
   analyzer = Meyda.createMeydaAnalyzer({
     audioContext,
     source: sourceNode,
     bufferSize: BUFFER_SIZE,
-    featureExtractors: ['rms', 'energy', 'spectralCentroid', 'zcr', 'spectralFlux', 'amplitudeSpectrum'],
+    featureExtractors: ['rms', 'energy', 'spectralCentroid', 'zcr', 'amplitudeSpectrum'],
     callback: handleFrame,
   })
 
@@ -110,7 +112,29 @@ export function stopBPMDetector() {
   lastOnsetTime = 0
   lastTempoEstimate = 0
   bpmMedianHistory = []
+  previousAmplitudeSpectrum = null
   callback = null
+}
+
+function computeSpectralFlux(amplitudeSpectrum) {
+  if (!amplitudeSpectrum || amplitudeSpectrum.length === 0) {
+    previousAmplitudeSpectrum = null
+    return 0
+  }
+
+  if (!previousAmplitudeSpectrum || previousAmplitudeSpectrum.length !== amplitudeSpectrum.length) {
+    previousAmplitudeSpectrum = amplitudeSpectrum.slice()
+    return 0
+  }
+
+  let flux = 0
+  for (let i = 0; i < amplitudeSpectrum.length; i++) {
+    const delta = Math.abs(amplitudeSpectrum[i]) - Math.abs(previousAmplitudeSpectrum[i])
+    if (delta > 0) flux += delta
+  }
+
+  previousAmplitudeSpectrum = amplitudeSpectrum.slice()
+  return flux
 }
 
 function computeBandEnergies(amplitudeSpectrum) {
@@ -144,9 +168,9 @@ function computeBandEnergies(amplitudeSpectrum) {
 function handleFrame(features) {
   if (!features) return
 
-  const { rms, spectralCentroid, zcr, spectralFlux, amplitudeSpectrum } = features
+  const { rms, spectralCentroid, zcr, amplitudeSpectrum } = features
   const now = performance.now()
-  const flux = spectralFlux || 0
+  const flux = computeSpectralFlux(amplitudeSpectrum)
 
   // Compute multi-band energies
   const bands = computeBandEnergies(amplitudeSpectrum)
