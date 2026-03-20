@@ -22,6 +22,8 @@ import styles from './Dashboard.module.css'
 
 const AUTO_GAIN_TARGET_RMS = 0.11
 const AUTO_GAIN_MIN_ACTIVE_RMS = 0.012
+const AUTO_GAIN_STABLE_LOW_RMS = 0.08
+const AUTO_GAIN_STABLE_HIGH_RMS = 0.15
 const AUTO_GAIN_ADJUSTMENT_ALPHA = 0.18
 const AUTO_GAIN_STEP_LIMIT = 0.18
 const MIN_INPUT_GAIN = 0.25
@@ -84,6 +86,7 @@ export default function Dashboard() {
   // Panic: house default page/exec inputs
   const [showPanicConfig, setShowPanicConfig] = useState(false)
   const autoGainCooldownRef = useRef(0)
+  const autoInputGainRef = useRef(autoInputGain)
 
   // ── Start / Stop capture ──────────────────────────────────────────────────
 
@@ -120,6 +123,13 @@ export default function Dashboard() {
     applyInputGain(inputGain, { immediate: true })
   }, [inputGain])
 
+  useEffect(() => {
+    autoInputGainRef.current = autoInputGain
+    if (!autoInputGain) {
+      autoGainCooldownRef.current = 0
+    }
+  }, [autoInputGain])
+
   async function startAudio(deviceId = audioDeviceId) {
     if (isStarting) return
     setIsStarting(true)
@@ -133,10 +143,13 @@ export default function Dashboard() {
       await startBPMDetector(audioContext, sourceNode, (frame) => {
         if (overrides.holdFreeze) return
 
-        if (autoInputGain) {
+        if (autoInputGainRef.current) {
           const now = performance.now()
           const measuredRms = frame.rms ?? 0
-          if (!frame.isSilent && measuredRms >= AUTO_GAIN_MIN_ACTIVE_RMS && now >= autoGainCooldownRef.current) {
+          const needsGainCorrection =
+            measuredRms < AUTO_GAIN_STABLE_LOW_RMS || measuredRms > AUTO_GAIN_STABLE_HIGH_RMS
+
+          if (!frame.isSilent && measuredRms >= AUTO_GAIN_MIN_ACTIVE_RMS && needsGainCorrection && now >= autoGainCooldownRef.current) {
             const currentGain = getInputGain()
             const targetGain = clamp(currentGain * (AUTO_GAIN_TARGET_RMS / measuredRms), MIN_INPUT_GAIN, MAX_INPUT_GAIN)
             const limitedTarget = clamp(
