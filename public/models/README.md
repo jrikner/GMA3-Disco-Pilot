@@ -32,24 +32,27 @@ The app can use the Discogs MAEST-30s model for 519-class music style classifica
 
 | File | Size | Notes |
 |------|------|-------|
-| `maest-30s-pw.onnx` | ~200 MB | ONNX model file |
+| `maest-30s-pw/model.json` | varies | TensorFlow.js graph model manifest used by the browser runtime |
+| `maest-30s-pw/group*.bin` | varies | TensorFlow.js weight shard files referenced by `model.json` |
 | `discogs_519labels.txt` | ~6 KB | Label list used to map MAEST output logits back to style names |
 
 Download with curl:
 
 ```bash
 mkdir -p public/models
-curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" \
-     -o public/models/maest-30s-pw.onnx
+mkdir -p public/models/maest-30s-pw
+# Copy the TensorFlow.js export (model.json + referenced group*.bin shards) into:
+#   public/models/maest-30s-pw/
 
 curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/discogs_519labels.txt" \
      -o public/models/discogs_519labels.txt
 ```
 
-Or manually: go to [https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l](https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l), click the **↓** icon next to `maest-30s-pw.onnx`, and move the file here.
+Or manually: copy a **TensorFlow.js graph model export** so that `public/models/maest-30s-pw/model.json` exists alongside the weight shard files it references. The current browser pipeline does **not** load the standalone `.onnx` file directly.
 
-Without this model, Essentia's lower-level audio features still improve detection over
-the pure spectral heuristic fallback.
+If only the `.onnx` file is present, the app now logs a warning and stays on the spectral fallback path instead of repeatedly throwing inference errors.
+
+Without this model, the app falls back to the spectral heuristic path.
 
 If `discogs_519labels.txt` is missing, the detector can still run but MAEST predictions
 cannot be reliably mapped to the internal 8 genres.
