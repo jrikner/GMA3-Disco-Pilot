@@ -98,7 +98,7 @@ export default function Home() {
         }}>
           <strong style={{ color: '#f59e0b' }}>Genre detection running in heuristic mode.</strong>
           <br />
-          For higher accuracy, add Essentia.js model files to{' '}
+          For higher accuracy, run <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>npm run setup:models</code> and add the MAEST TensorFlow.js graph files to{' '}
           <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>
             public/models/
           </code>
