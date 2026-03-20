@@ -66,6 +66,7 @@ const useStore = create((set, get) => ({
     genre: 'unknown',
     genreConfidence: 0,
     topGenres: [],        // [{ genre, raw, weighted }] top-N debug
+    audioError: null,
   },
 
   updateLive: (patch) => set((s) => ({ live: { ...s.live, ...patch } })),

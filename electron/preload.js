@@ -11,6 +11,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeAllListeners('osc:received')
   },
 
+  // Permissions
+  onMicrophonePermission: (cb) => {
+    ipcRenderer.on('permissions:microphone', (_, data) => cb(data))
+    return () => ipcRenderer.removeAllListeners('permissions:microphone')
+  },
+
   // HTTP server for iPad
   httpStart: (opts) => ipcRenderer.invoke('http:start', opts),
 
