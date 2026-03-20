@@ -19,8 +19,7 @@
  * @param {Object} config
  * @param {Array}  config.fixtureGroups - from session.fixtureGroups
  * @param {number} config.page          - executor page (must match main plugin)
- * @param {number} config.phaserExecStart - first phaser executor (main plugin uses startExec+8)
- * @param {boolean} [config.includePtFast=true]  - include DP_PHASER_PT_FAST
+ * @param {number} config.phaserExecStart - first phaser executor after the color look sequence
  * @param {boolean} [config.includePanOnly=true] - include DP_PHASER_PAN_ONLY
  * @param {boolean} [config.includeTiltOnly=true] - include DP_PHASER_TILT_ONLY
  * @param {string}  [config.ptPreset]  - preset reference for combined P/T look (e.g. 21.1)
@@ -32,7 +31,6 @@ export function generatePhaserPlugin(config) {
     fixtureGroups,
     page,
     phaserExecStart,
-    includePtFast = true,
     includePanOnly = true,
     includeTiltOnly = true,
     ptPreset = '',
@@ -41,8 +39,8 @@ export function generatePhaserPlugin(config) {
   } = config
 
   const moverGroups = fixtureGroups.filter(g => g.attributes?.pt)
-  const rgbGroups   = fixtureGroups.filter(g => g.attributes?.rgb || g.attributes?.colorWheel)
-  const allGroups   = fixtureGroups
+  const rgbGroups = fixtureGroups.filter(g => g.attributes?.rgb || g.attributes?.colorWheel)
+  const allGroups = fixtureGroups
 
   const lines = []
   let exec = phaserExecStart
@@ -72,10 +70,9 @@ export function generatePhaserPlugin(config) {
   lines.push(`  end`)
   lines.push(``)
 
-  // ── P/T Slow ──────────────────────────────────────────────────────────────
   if (moverGroups.length > 0) {
     lines.push(`  -- ┌─────────────────────────────────────────┐`)
-    lines.push(`  -- │ Pan/Tilt SLOW Phaser  (Page ${page}, Exec ${exec}) │`)
+    lines.push(`  -- │ Pan/Tilt CIRCLE Phaser (Page ${page}, Exec ${exec}) │`)
     lines.push(`  -- └─────────────────────────────────────────┘`)
     lines.push(`  -- Effect Engine approach (verify syntax in your MA3 version):`)
     lines.push(`  gma.cmd("ClearAll")`)
@@ -83,13 +80,12 @@ export function generatePhaserPlugin(config) {
       lines.push(`  gma.cmd("SelFix Group \"${g.maGroupName}\"")`)
     }
     lines.push(`  -- Attempt Effect Engine: if this fails, see step-chase alternative below`)
-    lines.push(`  gma.cmd("Attribute \\"Pan\\" Phaser 1")`)
-    lines.push(`  gma.cmd("Attribute \\"Tilt\\" Phaser 1")`)
+    lines.push(`  gma.cmd("Attribute \"Pan\" Phaser 1")`)
+    lines.push(`  gma.cmd("Attribute \"Tilt\" Phaser 1")`)
     lines.push(`  applyPreset("${ptPreset}")`)
-    lines.push(`  -- Note: to set Width=30 Rate=0.3, open the Effect Engine window in MA3`)
-    lines.push(`  -- and adjust \"DP_PHASER_PT_SLOW\" after running this script`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_SLOW\\" Cue 1 Merge")`)
-    lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_PT_SLOW\\" at Page ${page} Exec ${exec}")`)
+    lines.push(`  -- Open Effect Engine after running and tune DP_PHASER_PT to taste`)
+    lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT\" Cue 1 Merge")`)
+    lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PT\" at Page ${page} Exec ${exec}")`)
     lines.push(`  assignTempFader(${page}, ${exec})`)
     lines.push(``)
     lines.push(`  --[[ STEP-CHASE ALTERNATIVE (comment the above, uncomment this):`)
@@ -98,39 +94,17 @@ export function generatePhaserPlugin(config) {
     for (const g of moverGroups) {
       lines.push(`  gma.cmd("SelFix Group \"${g.maGroupName}\"")`)
     }
-    const panPositions = [50,56,62,68,74,80,74,68,62,56,50,44,38,32,38,44]
+    const panPositions = [50, 56, 62, 68, 74, 80, 74, 68, 62, 56, 50, 44, 38, 32, 38, 44]
     panPositions.forEach((pos, i) => {
-      lines.push(`  gma.cmd("Attribute \\"Pan\\" at ${pos}")`)
-      lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_SLOW\\" Cue ${i+1} Merge")`)
-      lines.push(`  gma.cmd("Cue ${i+1} Sequence \\"DP_PHASER_PT_SLOW\\" property \\"FadeTime\\" 0.3")`)
+      lines.push(`  gma.cmd("Attribute \"Pan\" at ${pos}")`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PT\" Cue ${i + 1} Merge")`)
+      lines.push(`  gma.cmd("Cue ${i + 1} Sequence \"DP_PHASER_PT\" property \"FadeTime\" 0.3")`)
     })
-    lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_PT_SLOW\\" at Page ${page} Exec ${exec}")`)
+    lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PT\" at Page ${page} Exec ${exec}")`)
     lines.push(`  assignTempFader(${page}, ${exec})`)
     lines.push(`  --]]`)
     lines.push(``)
     exec++
-
-    if (includePtFast) {
-      lines.push(`  -- ┌─────────────────────────────────────────┐`)
-      lines.push(`  -- │ Pan/Tilt FAST Phaser  (Page ${page}, Exec ${exec}) │`)
-      lines.push(`  -- └─────────────────────────────────────────┘`)
-      lines.push(`  gma.cmd("ClearAll")`)
-      for (const g of moverGroups) {
-        lines.push(`  gma.cmd("SelFix Group \"${g.maGroupName}\"")`)
-      }
-      lines.push(`  gma.cmd("Attribute \\"Pan\\" Phaser 1")`)
-      lines.push(`  gma.cmd("Attribute \\"Tilt\\" Phaser 1")`)
-      lines.push(`  applyPreset("${ptPreset}")`)
-      lines.push(`  -- Adjust width/rate in Effect Engine after running (target: Width=45, Rate=1.2)`)
-      lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PT_FAST\\" Cue 1 Merge")`)
-      lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_PT_FAST\\" at Page ${page} Exec ${exec}")`)
-      lines.push(`  assignTempFader(${page}, ${exec})`)
-      lines.push(``)
-      exec++
-    } else {
-      lines.push(`  -- PT Fast disabled in generator options — skipping DP_PHASER_PT_FAST`)
-      lines.push(``)
-    }
 
     if (includePanOnly) {
       lines.push(`  -- ┌─────────────────────────────────────────┐`)
@@ -140,11 +114,11 @@ export function generatePhaserPlugin(config) {
       for (const g of moverGroups) {
         lines.push(`  gma.cmd("SelFix Group \"${g.maGroupName}\"")`)
       }
-      lines.push(`  gma.cmd("Attribute \\"Pan\\" Phaser 1")`)
+      lines.push(`  gma.cmd("Attribute \"Pan\" Phaser 1")`)
       lines.push(`  applyPreset("${panPreset}")`)
       lines.push(`  -- Adjust width/rate in Effect Engine after running`)
-      lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_PAN_ONLY\\" Cue 1 Merge")`)
-      lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_PAN_ONLY\\" at Page ${page} Exec ${exec}")`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_PAN_ONLY\" Cue 1 Merge")`)
+      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_PAN_ONLY\" at Page ${page} Exec ${exec}")`)
       lines.push(`  assignTempFader(${page}, ${exec})`)
       lines.push(``)
       exec++
@@ -158,11 +132,11 @@ export function generatePhaserPlugin(config) {
       for (const g of moverGroups) {
         lines.push(`  gma.cmd("SelFix Group \"${g.maGroupName}\"")`)
       }
-      lines.push(`  gma.cmd("Attribute \\"Tilt\\" Phaser 1")`)
+      lines.push(`  gma.cmd("Attribute \"Tilt\" Phaser 1")`)
       lines.push(`  applyPreset("${tiltPreset}")`)
       lines.push(`  -- Adjust width/rate in Effect Engine after running`)
-      lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_TILT_ONLY\\" Cue 1 Merge")`)
-      lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_TILT_ONLY\\" at Page ${page} Exec ${exec}")`)
+      lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_TILT_ONLY\" Cue 1 Merge")`)
+      lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_TILT_ONLY\" at Page ${page} Exec ${exec}")`)
       lines.push(`  assignTempFader(${page}, ${exec})`)
       lines.push(``)
       exec++
@@ -172,39 +146,43 @@ export function generatePhaserPlugin(config) {
     lines.push(``)
   }
 
-  // ── Color Chase ───────────────────────────────────────────────────────────
   if (rgbGroups.length > 0) {
     lines.push(`  -- ┌───────────────────────────────────────────┐`)
     lines.push(`  -- │ Color Chase Phaser    (Page ${page}, Exec ${exec}) │`)
     lines.push(`  -- └───────────────────────────────────────────┘`)
     lines.push(`  gma.cmd("ClearAll")`)
     for (const g of rgbGroups) {
-      lines.push(`  gma.cmd("SelFix Group \\"${g.maGroupName}\\"")`)
+      lines.push(`  gma.cmd("SelFix Group \"${g.maGroupName}\"")`)
     }
-    lines.push(`  gma.cmd("Attribute \\"Hue\\" Phaser 1")`)
+    lines.push(`  gma.cmd("Attribute \"Hue\" Phaser 1")`)
     lines.push(`  -- Adjust Hue phaser range in Effect Engine (target: Width=180 for full rainbow sweep)`)
-    lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_COLOR\\" Cue 1 Merge")`)
-    lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_COLOR\\" at Page ${page} Exec ${exec}")`)
+    lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_COLOR\" Cue 1 Merge")`)
+    lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_COLOR\" at Page ${page} Exec ${exec}")`)
+    lines.push(``)
+    exec++
   } else {
-    lines.push(`  -- No RGB groups — skipping color chase (exec ${exec})`)
+    lines.push(`  -- No RGB groups — skipping color chase`)
+    lines.push(``)
   }
-  lines.push(``)
-  exec++
 
-  // ── Dimmer Pulse ──────────────────────────────────────────────────────────
-  lines.push(`  -- ┌────────────────────────────────────────────┐`)
-  lines.push(`  -- │ Dimmer Pulse Phaser    (Page ${page}, Exec ${exec}) │`)
-  lines.push(`  -- └────────────────────────────────────────────┘`)
-  lines.push(`  gma.cmd("ClearAll")`)
-  for (const g of allGroups) {
-    lines.push(`  gma.cmd("SelFix Group \\"${g.maGroupName}\\"")`)
+  if (allGroups.length > 0) {
+    lines.push(`  -- ┌────────────────────────────────────────────┐`)
+    lines.push(`  -- │ Dimmer Pulse Phaser    (Page ${page}, Exec ${exec}) │`)
+    lines.push(`  -- └────────────────────────────────────────────┘`)
+    lines.push(`  gma.cmd("ClearAll")`)
+    for (const g of allGroups) {
+      lines.push(`  gma.cmd("SelFix Group \"${g.maGroupName}\"")`)
+    }
+    lines.push(`  gma.cmd("Attribute \"Dimmer\" Phaser 1")`)
+    lines.push(`  -- Adjust phaser shape to Square in Effect Engine (for hard on/off pulse)`)
+    lines.push(`  gma.cmd("Store Sequence \"DP_PHASER_DIM\" Cue 1 Merge")`)
+    lines.push(`  gma.cmd("Assign Sequence \"DP_PHASER_DIM\" at Page ${page} Exec ${exec}")`)
+    lines.push(``)
+    exec++
+  } else {
+    lines.push(`  -- No fixture groups — skipping dimmer pulse`)
+    lines.push(``)
   }
-  lines.push(`  gma.cmd("Attribute \\"Dimmer\\" Phaser 1")`)
-  lines.push(`  -- Adjust phaser shape to Square in Effect Engine (for hard on/off pulse)`)
-  lines.push(`  gma.cmd("Store Sequence \\"DP_PHASER_DIM\\" Cue 1 Merge")`)
-  lines.push(`  gma.cmd("Assign Sequence \\"DP_PHASER_DIM\\" at Page ${page} Exec ${exec}")`)
-  lines.push(``)
-  exec++
 
   lines.push(`  gma.cmd("BlindEdit Off")`)
   lines.push(`  gma.echo("Disco Pilot Phasers: Done. Check sequences in Effect Engine to verify/adjust.")`)

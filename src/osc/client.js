@@ -6,7 +6,6 @@
 const api = () => window.electronAPI
 
 let connected = false
-let lastSendTime = 0
 const RATE_LIMIT_MS = 50  // Max one OSC message per 50ms per address
 
 // Per-address rate limiting
@@ -14,7 +13,7 @@ const lastSendByAddress = {}
 
 export async function connect(host, port) {
   const result = await api().oscConnect({ host, port })
-  connected = result.success
+  connected = result.success && result.socketReady !== false
   return result
 }
 
@@ -47,39 +46,23 @@ export async function send(address, args = [], opts = {}) {
   return api().oscSend({ address, args })
 }
 
-/**
- * Send an MA3 console command via OSC.
- * @param {string} cmd - e.g. "Go+ Seq 201"
- */
 export function sendCmd(cmd) {
   return send('/gma3/cmd', [cmd], { rateLimit: false })
 }
 
-/**
- * Set a fader on a specific page/executor to a normalized value (0–1).
- * The value is clamped to the provided boundaries.
- */
 export function setFader(page, exec, value, boundaries = { min: 0, max: 1 }) {
   const clamped = Math.max(boundaries.min, Math.min(boundaries.max, value))
   const address = `/gma3/page${page}/exec${exec}/fader`
   return send(address, [clamped])
 }
 
-/**
- * Press/release a key on a specific page/executor.
- */
 export function pressKey(page, exec, down = true) {
   const address = `/gma3/page${page}/exec${exec}/key`
   return send(address, [down ? 1 : 0], { rateLimit: false })
 }
 
-/**
- * Start listening for OSC messages from MA3 (feedback).
- */
 export async function startReceive(port, onMessage) {
   const result = await api().oscStartReceive({ port })
-  if (result.success) {
-    api().onOscReceived(onMessage)
-  }
-  return result
+  const unsubscribe = result.success ? api().onOscReceived(onMessage) : () => {}
+  return { ...result, unsubscribe }
 }

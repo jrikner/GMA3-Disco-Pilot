@@ -4,6 +4,7 @@ const { Client, Server } = require('node-osc')
 const http = require('http')
 const https = require('https')
 const fs = require('fs')
+const { execFile } = require('child_process')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -68,6 +69,41 @@ function fetchJsonViaNode(url, timeoutMs = 10000, redirectCount = 0) {
   })
 }
 
+
+function probeOscHost(host) {
+  return new Promise((resolve) => {
+    const target = String(host || '').trim()
+    if (!target) {
+      resolve({ reachable: false, error: 'Host is required' })
+      return
+    }
+
+    const pingArgs = process.platform === 'darwin'
+      ? ['-c', '1', '-t', '1', target]
+      : ['-c', '1', '-W', '1', target]
+
+    execFile('ping', pingArgs, { timeout: 2000 }, (error) => {
+      if (!error) {
+        resolve({ reachable: true })
+        return
+      }
+
+      if (error.code === 'ENOENT') {
+        resolve({
+          reachable: null,
+          warning: 'Ping is unavailable on this system, so the console could not be verified.',
+        })
+        return
+      }
+
+      resolve({
+        reachable: false,
+        warning: 'OSC socket opened, but the configured host did not respond to a reachability check.',
+      })
+    })
+  })
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -93,16 +129,24 @@ function createWindow() {
 
 // ── OSC Client ──────────────────────────────────────────────────────────────
 
-ipcMain.handle('osc:connect', (_, { host, port }) => {
+ipcMain.handle('osc:connect', async (_, { host, port }) => {
   try {
     if (oscClient) {
       oscClient.close()
       oscClient = null
     }
     oscClient = new Client(host, port)
-    return { success: true }
+
+    const probe = await probeOscHost(host)
+    return {
+      success: true,
+      socketReady: true,
+      verified: probe.reachable === true,
+      warning: probe.warning || null,
+      error: probe.reachable === false ? probe.warning : null,
+    }
   } catch (err) {
-    return { success: false, error: err.message }
+    return { success: false, socketReady: false, verified: false, error: err.message }
   }
 })
 

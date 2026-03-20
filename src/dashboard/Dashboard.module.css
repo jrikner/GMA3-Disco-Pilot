@@ -52,6 +52,11 @@
   box-shadow: 0 0 6px #22c55e80;
 }
 
+.oscDot.ready {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b80;
+}
+
 .oscDot.error {
   background: #ef4444;
 }

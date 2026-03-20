@@ -83,7 +83,7 @@ export function setBlackout(val) {
 
 function _activateBlackout() {
   // Snapshot current state then zero every known executor fader
-  const allPhasers = ['ptSlow', 'ptFast', 'colorChase', 'dimPulse', 'strobe']
+  const allPhasers = ['ptSlow', 'colorChase', 'dimPulse', 'strobe']
   const allMasters = ['bpmRate', 'effectSize']
 
   for (const type of allPhasers) {
@@ -202,9 +202,8 @@ function updatePhasers(profile) {
     }
   }
 
-  const hasMoverEnergy = Boolean(profile.phasers.ptSlow || profile.phasers.ptFast)
+  const hasMoverEnergy = Boolean(profile.phasers.ptSlow)
   const ptSlowExec = addressMap.getPhaserExecutor('ptSlow')
-  const ptFastExec = addressMap.getPhaserExecutor('ptFast')
   const panOnlyExec = addressMap.getPhaserExecutor('panOnly')
   const tiltOnlyExec = addressMap.getPhaserExecutor('tiltOnly')
 
@@ -227,10 +226,9 @@ function updatePhasers(profile) {
     }
   }
 
-  setMover('ptSlow', ptSlowExec, mode === 'ptSlow')
-  setMover('ptFast', ptFastExec, mode === 'ptFast')
-  setMover('panOnly', panOnlyExec, mode !== 'ptSlow' && mode !== 'ptFast', moverMix.pan)
-  setMover('tiltOnly', tiltOnlyExec, mode !== 'ptSlow' && mode !== 'ptFast', moverMix.tilt)
+  setMover('ptSlow', ptSlowExec, mode === 'ptCircle')
+  setMover('panOnly', panOnlyExec, mode === 'panTiltMix', moverMix.pan)
+  setMover('tiltOnly', tiltOnlyExec, mode === 'panTiltMix', moverMix.tilt)
 }
 
 function scheduleMoverModeRotation() {
@@ -245,7 +243,7 @@ function scheduleMoverModeRotation() {
 }
 
 function rotateMoverMode() {
-  const modes = ['ptSlow', 'ptFast', 'panTiltMix']
+  const modes = ['ptCircle', 'panTiltMix']
   activePhaseState.moverMode = modes[Math.floor(Math.random() * modes.length)]
 
   if (activePhaseState.moverMode === 'panTiltMix') {

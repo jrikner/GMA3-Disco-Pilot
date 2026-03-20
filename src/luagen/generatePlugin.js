@@ -8,7 +8,7 @@
  *
  * What is created:
  *   - 8 color look sequences (one per genre), assigned to the declared free executors
- *   - phaser sequences (ptSlow, optional ptFast/panOnly/tiltOnly, colorChase, dimPulse)
+ *   - phaser sequences (pt, optional panOnly/tiltOnly, colorChase, dimPulse)
  *   - 1 BPM Rate Master executor
  *   - 1 Effect Size Master executor
  *
@@ -126,40 +126,24 @@ export function generatePlugin(config) {
   }
 
   const {
-    includePtFast = true,
     includePanOnly = true,
     includeTiltOnly = true,
   } = phaserConfig
 
   // Pan/Tilt movement phasers
   if (moverGroups.length > 0) {
-    lines.push(`  -- P/T Slow Phaser (Page ${page}, Exec ${exec})`)
-    lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT_SLOW\"")`)
-    lines.push(`  Cmd("Label Sequence \"DP_PHASER_PT_SLOW\" \"DP Phaser PT Slow\"")`)
+    lines.push(`  -- P/T Circle Phaser (Page ${page}, Exec ${exec})`)
+    lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT\"")`)
+    lines.push(`  Cmd("Label Sequence \"DP_PHASER_PT\" \"DP Phaser PT\"")`)
     for (const group of moverGroups) {
       lines.push(`  Cmd("SelFix Group \"${group.maGroupName}\"")`)
     }
     lines.push(`  Cmd("Attribute \"Pan\" Effect Sinus Width 30 Rate 0.3")`)
     lines.push(`  Cmd("Attribute \"Tilt\" Effect Sinus Width 25 Rate 0.3 Phase 90")`)
-    lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT_SLOW\" Cue 1 Merge")`)
-    lines.push(`  Cmd("Assign Sequence \"DP_PHASER_PT_SLOW\" at Page ${page} Exec ${exec}")`)
+    lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT\" Cue 1 Merge")`)
+    lines.push(`  Cmd("Assign Sequence \"DP_PHASER_PT\" at Page ${page} Exec ${exec}")`)
     lines.push(``)
     exec++
-
-    if (includePtFast) {
-      lines.push(`  -- P/T Fast Phaser (Page ${page}, Exec ${exec})`)
-      lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT_FAST\"")`)
-      lines.push(`  Cmd("Label Sequence \"DP_PHASER_PT_FAST\" \"DP Phaser PT Fast\"")`)
-      for (const group of moverGroups) {
-        lines.push(`  Cmd("SelFix Group \"${group.maGroupName}\"")`)
-      }
-      lines.push(`  Cmd("Attribute \"Pan\" Effect Sinus Width 45 Rate 1.2")`)
-      lines.push(`  Cmd("Attribute \"Tilt\" Effect Sinus Width 35 Rate 1.2 Phase 90")`)
-      lines.push(`  Cmd("Store Sequence \"DP_PHASER_PT_FAST\" Cue 1 Merge")`)
-      lines.push(`  Cmd("Assign Sequence \"DP_PHASER_PT_FAST\" at Page ${page} Exec ${exec}")`)
-      lines.push(``)
-      exec++
-    }
 
     if (includePanOnly) {
       lines.push(`  -- Pan-only Phaser (Page ${page}, Exec ${exec})`)
@@ -193,32 +177,32 @@ export function generatePlugin(config) {
   // Color Chase phaser
   if (rgbGroups.length > 0) {
     lines.push(`  -- Color Chase (Page ${page}, Exec ${exec})`)
-    lines.push(`  Cmd("Store Sequence \\"DP_PHASER_COLOR\\"")`)
-    lines.push(`  Cmd("Label Sequence \\"DP_PHASER_COLOR\\" \\"DP Color Chase\\"")`)
+    lines.push(`  Cmd("Store Sequence \"DP_PHASER_COLOR\"")`)
+    lines.push(`  Cmd("Label Sequence \"DP_PHASER_COLOR\" \"DP Color Chase\"")`)
     for (const group of rgbGroups) {
-      lines.push(`  Cmd("SelFix Group \\"${group.maGroupName}\\"")`)
+      lines.push(`  Cmd("SelFix Group \"${group.maGroupName}\"")`)
     }
-    lines.push(`  Cmd("Attribute \\"Hue\\" Effect Sinus Width 180 Rate 0.5")`)
-    lines.push(`  Cmd("Store Sequence \\"DP_PHASER_COLOR\\" Cue 1 Merge")`)
-    lines.push(`  Cmd("Assign Sequence \\"DP_PHASER_COLOR\\" at Page ${page} Exec ${exec}")`)
+    lines.push(`  Cmd("Attribute \"Hue\" Effect Sinus Width 180 Rate 0.5")`)
+    lines.push(`  Cmd("Store Sequence \"DP_PHASER_COLOR\" Cue 1 Merge")`)
+    lines.push(`  Cmd("Assign Sequence \"DP_PHASER_COLOR\" at Page ${page} Exec ${exec}")`)
     lines.push(``)
-    exec++
-  } else {
     exec++
   }
 
   // Dimmer Pulse phaser
-  lines.push(`  -- Dimmer Pulse (Page ${page}, Exec ${exec})`)
-  lines.push(`  Cmd("Store Sequence \\"DP_PHASER_DIM\\"")`)
-  lines.push(`  Cmd("Label Sequence \\"DP_PHASER_DIM\\" \\"DP Dimmer Pulse\\"")`)
-  for (const group of dimGroups) {
-    lines.push(`  Cmd("SelFix Group \\"${group.maGroupName}\\"")`)
+  if (dimGroups.length > 0) {
+    lines.push(`  -- Dimmer Pulse (Page ${page}, Exec ${exec})`)
+    lines.push(`  Cmd("Store Sequence \"DP_PHASER_DIM\"")`)
+    lines.push(`  Cmd("Label Sequence \"DP_PHASER_DIM\" \"DP Dimmer Pulse\"")`)
+    for (const group of dimGroups) {
+      lines.push(`  Cmd("SelFix Group \"${group.maGroupName}\"")`)
+    }
+    lines.push(`  Cmd("Attribute \"Dimmer\" Effect Square Width 50 Rate 1")`)
+    lines.push(`  Cmd("Store Sequence \"DP_PHASER_DIM\" Cue 1 Merge")`)
+    lines.push(`  Cmd("Assign Sequence \"DP_PHASER_DIM\" at Page ${page} Exec ${exec}")`)
+    lines.push(``)
+    exec++
   }
-  lines.push(`  Cmd("Attribute \\"Dimmer\\" Effect Square Width 50 Rate 1")`)
-  lines.push(`  Cmd("Store Sequence \\"DP_PHASER_DIM\\" Cue 1 Merge")`)
-  lines.push(`  Cmd("Assign Sequence \\"DP_PHASER_DIM\\" at Page ${page} Exec ${exec}")`)
-  lines.push(``)
-  exec++
 
   // ── Masters ──────────────────────────────────────────────────────────────────
   lines.push(`  -- ╔══════════════╗`)

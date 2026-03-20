@@ -11,7 +11,7 @@
  *   effectSize      - 0 = subtle, 1 = maximum amplitude effect
  *   strobeEnabled   - whether strobe is allowed for this genre
  *   strobeIntensity - strobe intensity (0–1), only used if strobeEnabled
- *   phasers         - which phasers to activate: ptSlow, ptFast, panOnly, tiltOnly, colorChase, dimPulse
+ *   phasers         - which phasers to activate: ptSlow, panOnly, tiltOnly, colorChase, dimPulse
  *   bpmTracking     - whether to follow detected BPM for rate master
  *   transitionTime  - seconds for crossfade when switching TO this genre
  *
@@ -28,7 +28,7 @@ export const GENRE_PROFILES = {
     effectSize: 0.8,
     strobeEnabled: true,
     strobeIntensity: 0.7,
-    phasers: { ptSlow: false, ptFast: true, colorChase: false, dimPulse: true },
+    phasers: { ptSlow: true, colorChase: false, dimPulse: true },
     bpmTracking: true,
     transitionTime: 1.0,
     colorPalette: {
@@ -48,7 +48,7 @@ export const GENRE_PROFILES = {
     effectSize: 0.75,
     strobeEnabled: true,
     strobeIntensity: 0.5,
-    phasers: { ptSlow: false, ptFast: true, colorChase: true, dimPulse: true },
+    phasers: { ptSlow: true, colorChase: true, dimPulse: true },
     bpmTracking: true,
     transitionTime: 1.5,
     colorPalette: {
@@ -68,7 +68,7 @@ export const GENRE_PROFILES = {
     effectSize: 0.5,
     strobeEnabled: false,
     strobeIntensity: 0,
-    phasers: { ptSlow: true, ptFast: false, colorChase: false, dimPulse: false },
+    phasers: { ptSlow: true, colorChase: false, dimPulse: false },
     bpmTracking: true,
     transitionTime: 2.0,
     colorPalette: {
@@ -88,7 +88,7 @@ export const GENRE_PROFILES = {
     effectSize: 0.6,
     strobeEnabled: false,
     strobeIntensity: 0,
-    phasers: { ptSlow: false, ptFast: false, colorChase: true, dimPulse: false },
+    phasers: { ptSlow: false, colorChase: true, dimPulse: false },
     bpmTracking: true,
     transitionTime: 1.5,
     colorPalette: {
@@ -109,7 +109,7 @@ export const GENRE_PROFILES = {
     effectSize: 0.55,
     strobeEnabled: false,
     strobeIntensity: 0,
-    phasers: { ptSlow: false, ptFast: false, colorChase: true, dimPulse: true },
+    phasers: { ptSlow: false, colorChase: true, dimPulse: true },
     bpmTracking: true,
     transitionTime: 2.0,
     colorPalette: {
@@ -129,7 +129,7 @@ export const GENRE_PROFILES = {
     effectSize: 0.6,
     strobeEnabled: false,
     strobeIntensity: 0,
-    phasers: { ptSlow: true, ptFast: false, colorChase: true, dimPulse: false },
+    phasers: { ptSlow: true, colorChase: true, dimPulse: false },
     bpmTracking: true,
     transitionTime: 2.0,
     colorPalette: {
@@ -149,7 +149,7 @@ export const GENRE_PROFILES = {
     effectSize: 0.7,
     strobeEnabled: true,
     strobeIntensity: 0.4,
-    phasers: { ptSlow: false, ptFast: true, colorChase: false, dimPulse: true },
+    phasers: { ptSlow: true, colorChase: false, dimPulse: true },
     bpmTracking: true,
     transitionTime: 1.0,
     colorPalette: {
@@ -169,7 +169,7 @@ export const GENRE_PROFILES = {
     effectSize: 0.15,
     strobeEnabled: false,
     strobeIntensity: 0,
-    phasers: { ptSlow: false, ptFast: false, colorChase: false, dimPulse: false },
+    phasers: { ptSlow: false, colorChase: false, dimPulse: false },
     bpmTracking: false,
     transitionTime: 4.0,
     colorPalette: {
@@ -188,7 +188,7 @@ export const GENRE_PROFILES = {
     effectSize: 0.3,
     strobeEnabled: false,
     strobeIntensity: 0,
-    phasers: { ptSlow: true, ptFast: false, colorChase: false, dimPulse: false },
+    phasers: { ptSlow: true, colorChase: false, dimPulse: false },
     bpmTracking: false,
     transitionTime: 2.0,
     colorPalette: {

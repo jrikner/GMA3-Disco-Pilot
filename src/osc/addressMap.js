@@ -27,15 +27,14 @@
  *   },
  *   phasers: {
  *     ptSlow:    { page: 2, exec: 10 },
- *     ptFast:    { page: 2, exec: 11 },
- *     panOnly:   { page: 2, exec: 12 },
- *     tiltOnly:  { page: 2, exec: 13 },
- *     colorChase:{ page: 2, exec: 14 },
- *     dimPulse:  { page: 2, exec: 15 },
+ *     panOnly:   { page: 2, exec: 11 },
+ *     tiltOnly:  { page: 2, exec: 12 },
+ *     colorChase:{ page: 2, exec: 13 },
+ *     dimPulse:  { page: 2, exec: 14 },
  *   },
  *   masters: {
- *     bpmRate:   { page: 2, exec: 16 },
- *     effectSize:{ page: 2, exec: 17 },
+ *     bpmRate:   { page: 2, exec: 15 },
+ *     effectSize:{ page: 2, exec: 16 },
  *   }
  * }
  */
@@ -46,8 +45,51 @@ let map = {
   masters: {},
 }
 
-/** Calibrated boundaries per executor (set during Setup Wizard step 7) */
+/** Calibrated boundaries per executor, if the operator chooses to store them. */
 let boundaries = {}  // key: `${page}_${exec}` → { min: 0, max: 1 }
+
+const GENRES = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
+
+const DEFAULT_PHASER_CONFIG = {
+  includePanOnly: true,
+  includeTiltOnly: true,
+}
+
+export function getExecutorPlan({ fixtureGroups = [], phaserConfig = {} } = {}) {
+  const mergedPhaserConfig = { ...DEFAULT_PHASER_CONFIG, ...phaserConfig }
+  const hasMoverGroups = fixtureGroups.some(g => g.attributes?.pt)
+  const hasRgbGroups = fixtureGroups.some(g => g.attributes?.rgb || g.attributes?.colorWheel)
+  const hasAnyGroups = fixtureGroups.length > 0
+
+  const rows = [
+    { key: 'color_sequence', label: 'Color Looks Sequence (cues 1–8)', type: 'color' },
+  ]
+
+  if (hasMoverGroups) {
+    rows.push({ key: 'phaser_ptSlow', label: 'Phaser: Pan/Tilt Circle', type: 'phaser' })
+    if (mergedPhaserConfig.includePanOnly) {
+      rows.push({ key: 'phaser_panOnly', label: 'Phaser: Pan-only', type: 'phaser' })
+    }
+    if (mergedPhaserConfig.includeTiltOnly) {
+      rows.push({ key: 'phaser_tiltOnly', label: 'Phaser: Tilt-only', type: 'phaser' })
+    }
+  }
+
+  if (hasRgbGroups) {
+    rows.push({ key: 'phaser_colorChase', label: 'Phaser: Color Chase', type: 'phaser' })
+  }
+
+  if (hasAnyGroups) {
+    rows.push({ key: 'phaser_dimPulse', label: 'Phaser: Dimmer Pulse', type: 'phaser' })
+  }
+
+  rows.push(
+    { key: 'master_bpmRate', label: 'Master: BPM Rate', type: 'master' },
+    { key: 'master_effectSize', label: 'Master: Effect Size', type: 'master' },
+  )
+
+  return rows
+}
 
 export function setAddressMap(newMap) {
   map = newMap
@@ -92,39 +134,31 @@ export function getMasterExecutor(type) {
  *   { page: number, startExec: number }
  */
 export function buildAddressMapFromWizard(wizardConfig) {
-  const { page, startExec, phaserConfig = {} } = wizardConfig
+  const {
+    page,
+    startExec,
+    fixtureGroups = [],
+    phaserConfig = {},
+  } = wizardConfig
   let exec = startExec
 
-  const genres = ['techno', 'edm', 'hiphop', 'pop', 'eighties', 'latin', 'rock', 'corporate']
   const cueMap = {}
-  genres.forEach((genre, index) => {
+  GENRES.forEach((genre, index) => {
     cueMap[genre] = index + 1
   })
+
   const colorLooks = {
     sequence: { page, exec: exec++ },
     cueMap,
   }
 
-  const {
-    includePtFast = true,
-    includePanOnly = true,
-    includeTiltOnly = true,
-  } = phaserConfig
+  const phasers = {}
+  const masters = {}
 
-  const phasers = {
-    ptSlow: { page, exec: exec++ },
-  }
-
-  if (includePtFast) phasers.ptFast = { page, exec: exec++ }
-  if (includePanOnly) phasers.panOnly = { page, exec: exec++ }
-  if (includeTiltOnly) phasers.tiltOnly = { page, exec: exec++ }
-
-  phasers.colorChase = { page, exec: exec++ }
-  phasers.dimPulse = { page, exec: exec++ }
-
-  const masters = {
-    bpmRate:    { page, exec: exec++ },
-    effectSize: { page, exec: exec++ },
+  for (const row of getExecutorPlan({ fixtureGroups, phaserConfig }).slice(1)) {
+    const target = row.type === 'master' ? masters : phasers
+    const key = row.key.replace(/^(phaser|master)_/, '')
+    target[key] = { page, exec: exec++ }
   }
 
   map = { colorLooks, phasers, masters }
