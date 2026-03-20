@@ -768,6 +768,7 @@ let smoothedGenreScores = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 1
 let processorNode = null
 let processorMessagePort = null
 const loadedWorkletContexts = new WeakSet()
+let essentiaLoadPromise = null
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -1009,31 +1010,68 @@ function applySpectralBias(scoreMap) {
 // ── Essentia.js Model (loads asynchronously) ──────────────────────────────────
 
 async function loadEssentia() {
-  try {
-    // Dynamic import from /public/models/
-    // IMPORTANT: use a variable + @vite-ignore so missing optional model files
-    // do not crash Vite import analysis during startup.
-    // Use an absolute URL computed at runtime so Vite does not try to
-    // pre-transform/import files from /public during dev.
-    const essentiaUrl = new URL('/models/essentia-wasm.es.js', window.location.origin).href
-    const EssentiaModule = await import(/* @vite-ignore */ essentiaUrl).catch(() => null)
-    if (!EssentiaModule) {
-      console.warn('[GenreDetector] Essentia.js not found in /public/models/ — using spectral heuristic fallback')
-      return
-    }
-    essentiaModule = await EssentiaModule.default()
-    maestLabels = await loadMaestLabels()
-    modelLoaded = Boolean(essentiaModule && maestLabels?.length)
-
-    if (!modelLoaded) {
-      console.warn('[GenreDetector] Essentia loaded but MAEST labels are missing or incompatible with prediction output format; enabling spectral heuristic fallback.')
-      return
-    }
-
-    console.log('[GenreDetector] Essentia.js loaded successfully', `(labels: ${maestLabels.length})`)
-  } catch (err) {
-    console.warn('[GenreDetector] Could not load Essentia.js:', err.message)
+  if (modelLoaded || essentiaModule) return
+  if (essentiaLoadPromise) {
+    await essentiaLoadPromise
+    return
   }
+
+  essentiaLoadPromise = (async () => {
+    try {
+      // Dynamic import from /public/models/
+      // IMPORTANT: use a variable + @vite-ignore so missing optional model files
+      // do not crash Vite import analysis during startup.
+      // Use an absolute URL computed at runtime so Vite does not try to
+      // pre-transform/import files from /public during dev.
+      const essentiaUrl = new URL('/models/essentia-wasm.es.js', window.location.origin).href
+      const importedModule = await import(/* @vite-ignore */ essentiaUrl).catch(() => null)
+      if (!importedModule) {
+        console.warn('[GenreDetector] Essentia.js not found in /public/models/ — using spectral heuristic fallback')
+        return
+      }
+
+      const factory = resolveEssentiaFactory(importedModule)
+      if (!factory) {
+        console.warn('[GenreDetector] Essentia.js module loaded, but no compatible factory export was found — using spectral heuristic fallback')
+        return
+      }
+
+      essentiaModule = await factory()
+      maestLabels = await loadMaestLabels()
+      modelLoaded = Boolean(essentiaModule && maestLabels?.length)
+
+      if (!modelLoaded) {
+        console.warn('[GenreDetector] Essentia loaded but MAEST labels are missing or incompatible with prediction output format; enabling spectral heuristic fallback.')
+        return
+      }
+
+      console.log('[GenreDetector] Essentia.js loaded successfully', `(labels: ${maestLabels.length})`)
+    } catch (err) {
+      console.warn('[GenreDetector] Could not load Essentia.js:', err.message)
+    }
+  })()
+
+  await essentiaLoadPromise
+}
+
+function resolveEssentiaFactory(importedModule) {
+  const candidates = [
+    importedModule,
+    importedModule?.default,
+    importedModule?.EssentiaModule,
+    importedModule?.createEssentiaModule,
+    importedModule?.default?.default,
+    importedModule?.default?.EssentiaModule,
+    importedModule?.default?.createEssentiaModule,
+  ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'function') {
+      return candidate
+    }
+  }
+
+  return null
 }
 
 async function loadMaestLabels() {

@@ -60,6 +60,8 @@ const BPM_CLUSTER_RADIUS = 2  // Group BPM candidates within ±2 BPM
 // Median filter for BPM stability
 const MEDIAN_HISTORY_SIZE = 7
 const BPM_MEDIAN_WEIGHT = 0.3  // Blend median estimate into final output
+const FEATURE_EXTRACTORS = ['rms', 'energy', 'spectralCentroid', 'zcr', 'amplitudeSpectrum']
+const BPM_BUFFER_WORKLET_URL = '/worklets/bpm-buffer-processor.js'
 
 let analyzer = null
 let onsetHistory = []               // timestamps of detected onsets
@@ -80,8 +82,14 @@ let fluxHistory = []                 // recent onset-strength values for adaptiv
 const SILENCE_FRAMES_THRESHOLD = 30 // ~3 seconds of silence
 
 let callback = null
+let processorNode = null
+let processorMessagePort = null
+let previousFrame = null
+let pendingSamples = []
+let connectedSourceNode = null
+const loadedWorkletContexts = new WeakSet()
 
-export function startBPMDetector(audioContext, sourceNode, cb) {
+export async function startBPMDetector(audioContext, sourceNode, cb) {
   callback = cb
   onsetHistory = []
   onsetEnergies = []
@@ -98,16 +106,61 @@ export function startBPMDetector(audioContext, sourceNode, cb) {
   bpmMedianHistory = []
   previousAmplitudeSpectrum = null
   fluxHistory = []
+  previousFrame = null
+  pendingSamples = []
 
-  analyzer = Meyda.createMeydaAnalyzer({
-    audioContext,
-    source: sourceNode,
-    bufferSize: BUFFER_SIZE,
-    featureExtractors: ['rms', 'energy', 'spectralCentroid', 'zcr', 'amplitudeSpectrum'],
-    callback: handleFrame,
+  Meyda.bufferSize = BUFFER_SIZE
+  Meyda.sampleRate = audioContext?.sampleRate || SAMPLE_RATE
+  Meyda.windowingFunction = 'hanning'
+
+  if (!audioContext.audioWorklet) {
+    throw new Error('AudioWorklet is unavailable in this environment.')
+  }
+
+  if (!loadedWorkletContexts.has(audioContext)) {
+    await audioContext.audioWorklet.addModule(BPM_BUFFER_WORKLET_URL)
+    loadedWorkletContexts.add(audioContext)
+  }
+
+  const processor = new AudioWorkletNode(audioContext, 'bpm-buffer-processor', {
+    numberOfInputs: 1,
+    numberOfOutputs: 0,
+    channelCount: 1,
+    channelCountMode: 'explicit',
+    channelInterpretation: 'speakers',
+    processorOptions: {
+      chunkSize: BUFFER_SIZE,
+    },
   })
 
-  analyzer.start()
+  processor.port.onmessage = (event) => {
+    const chunk = event.data instanceof Float32Array
+      ? event.data
+      : new Float32Array(event.data)
+    processChunk(chunk)
+  }
+
+  sourceNode.connect(processor)
+  connectedSourceNode = sourceNode
+  processorNode = processor
+  processorMessagePort = processor.port
+  analyzer = {
+    stop() {
+      if (connectedSourceNode && processorNode) {
+        connectedSourceNode.disconnect(processorNode)
+        connectedSourceNode = null
+      }
+      if (processorMessagePort) {
+        processorMessagePort.onmessage = null
+        processorMessagePort.close()
+        processorMessagePort = null
+      }
+      if (processorNode) {
+        processorNode.disconnect()
+        processorNode = null
+      }
+    },
+  }
 }
 
 export function stopBPMDetector() {
@@ -124,7 +177,25 @@ export function stopBPMDetector() {
   bpmMedianHistory = []
   previousAmplitudeSpectrum = null
   fluxHistory = []
+  previousFrame = null
+  pendingSamples = []
+  connectedSourceNode = null
   callback = null
+}
+
+function processChunk(chunk) {
+  if (!chunk?.length) return
+
+  pendingSamples.push(...chunk)
+
+  while (pendingSamples.length >= BUFFER_SIZE) {
+    const frame = Float32Array.from(pendingSamples.slice(0, BUFFER_SIZE))
+    pendingSamples = pendingSamples.slice(BUFFER_SIZE)
+
+    const features = Meyda.extract(FEATURE_EXTRACTORS, frame, previousFrame)
+    previousFrame = frame
+    handleFrame(features)
+  }
 }
 
 function computeSpectralFlux(amplitudeSpectrum) {
@@ -431,4 +502,3 @@ function pickEnvelopePeakBPM(points, frameMs, referenceBpm) {
   if (!Number.isFinite(bpm)) return null
   return normalizeBpmToReference(bpm, referenceBpm)
 }
-

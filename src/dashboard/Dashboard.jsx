@@ -130,7 +130,7 @@ export default function Dashboard() {
 
       await initGenreDetector(liveContexts)
 
-      startBPMDetector(audioContext, sourceNode, (frame) => {
+      await startBPMDetector(audioContext, sourceNode, (frame) => {
         if (overrides.holdFreeze) return
 
         if (autoInputGain) {
