@@ -32,7 +32,10 @@
     "productName": "GMA3 Disco Pilot",
     "mac": {
       "category": "public.app-category.music",
-      "target": "dmg"
+      "target": "dmg",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "GMA3 Disco Pilot needs microphone access to analyze BPM and detect music genre for live lighting automation."
+      }
     },
     "files": [
       "dist/**/*",

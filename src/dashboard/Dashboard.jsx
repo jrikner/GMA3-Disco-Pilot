@@ -77,13 +77,24 @@ export default function Dashboard() {
     loadAudioDevices()
   }, [])
 
+  useEffect(() => {
+    if (!window.electronAPI?.onMicrophonePermission) return undefined
+
+    return window.electronAPI.onMicrophonePermission(({ granted, error }) => {
+      updateLive({ audioError: granted ? null : error || 'Microphone access was denied.' })
+    })
+  }, [updateLive])
+
   async function loadAudioDevices() {
     try {
       // Request permission first so labels are available
       await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()))
       const devs = await listAudioDevices()
       setAudioDevices(devs)
-    } catch { /* ignore */ }
+      updateLive({ audioError: null })
+    } catch (err) {
+      updateLive({ audioError: err?.message || 'Microphone access is unavailable.' })
+    }
   }
 
   useEffect(() => {
@@ -134,9 +145,13 @@ export default function Dashboard() {
         genreProcessorRef.current = genreProcessor
       }
 
-      updateLive({ isCapturing: true })
+      updateLive({ isCapturing: true, audioError: null })
     } catch (err) {
       console.error('Failed to start audio:', err)
+      updateLive({
+        isCapturing: false,
+        audioError: err?.message || 'Unable to start microphone capture.',
+      })
     }
     setIsStarting(false)
   }
@@ -424,6 +439,12 @@ export default function Dashboard() {
             </span>
           )}
         </div>
+
+        {live.audioError && (
+          <div style={{ marginBottom: 12, color: '#fca5a5', fontSize: 11, lineHeight: 1.4 }}>
+            {live.audioError}
+          </div>
+        )}
 
         <div className={styles.bpmDisplay}>
           {overrides.manualBpm ?? live.bpm ?? '--'}

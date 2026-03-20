@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, session, systemPreferences } = require('electron')
 const path = require('path')
 const { Client, Server } = require('node-osc')
 const http = require('http')
@@ -13,6 +13,10 @@ let oscClient = null
 let oscServer = null
 let httpServer = null
 let wsServer = null
+let microphonePermissionState = {
+  granted: process.platform !== 'darwin',
+  error: null,
+}
 
 function fetchJsonViaNode(url, timeoutMs = 10000, redirectCount = 0) {
   return new Promise((resolve, reject) => {
@@ -69,6 +73,62 @@ function fetchJsonViaNode(url, timeoutMs = 10000, redirectCount = 0) {
   })
 }
 
+function sendMicrophonePermissionState() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('permissions:microphone', microphonePermissionState)
+  }
+}
+
+function isTrustedAppRequest(webContents, requestingOrigin = '') {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  if (webContents !== mainWindow.webContents) return false
+
+  if (isDev) {
+    return requestingOrigin.startsWith('http://localhost:5173') || requestingOrigin.startsWith('http://127.0.0.1:5173')
+  }
+
+  return requestingOrigin === 'file://' || requestingOrigin.startsWith('file://')
+}
+
+function registerPermissionHandlers() {
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details = {}) => {
+    if ((permission === 'media' || permission === 'audioCapture') && isTrustedAppRequest(webContents, details.requestingOrigin || '')) {
+      const allowed = microphonePermissionState.granted !== false
+      if (!allowed) {
+        microphonePermissionState = {
+          granted: false,
+          error: 'Microphone access was denied in macOS. Enable microphone access for GMA3 Disco Pilot in System Settings → Privacy & Security → Microphone.',
+        }
+        sendMicrophonePermissionState()
+      }
+      callback(allowed)
+      return
+    }
+
+    callback(false)
+  })
+}
+
+async function requestMicrophoneAccess() {
+  if (process.platform !== 'darwin') {
+    microphonePermissionState = { granted: true, error: null }
+    return
+  }
+
+  const currentStatus = systemPreferences.getMediaAccessStatus('microphone')
+  if (currentStatus === 'granted') {
+    microphonePermissionState = { granted: true, error: null }
+    return
+  }
+
+  const granted = await systemPreferences.askForMediaAccess('microphone')
+  microphonePermissionState = granted
+    ? { granted: true, error: null }
+    : {
+        granted: false,
+        error: 'Microphone access was denied in macOS. Enable microphone access for GMA3 Disco Pilot in System Settings → Privacy & Security → Microphone.',
+      }
+}
 
 function probeOscHost(host) {
   return new Promise((resolve) => {
@@ -117,6 +177,10 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  })
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    sendMicrophonePermissionState()
   })
 
   if (isDev) {
@@ -349,7 +413,11 @@ ipcMain.handle('net:fetchJson', async (_, { url, timeoutMs = 10000 } = {}) => {
 
 // ── App Lifecycle ────────────────────────────────────────────────────────────
 
-app.whenReady().then(createWindow)
+app.whenReady().then(async () => {
+  registerPermissionHandlers()
+  await requestMicrophoneAccess()
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (oscClient) oscClient.close()
