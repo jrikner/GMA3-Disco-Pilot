@@ -77,7 +77,18 @@ You will **not** automatically get this file from the repo:
 public/models/maest-30s-pw/model.json
 ```
 
-That is expected. The repository does not contain the MAEST TensorFlow.js graph export, and the helper script cannot invent it. If `npm run check:models` says the MAEST graph is missing, the app will still launch and work in heuristic mode.
+If you only have `maest-30s-pw.onnx`, the app will now log a warning and stay on the spectral fallback detector instead of repeatedly throwing Essentia inference errors. The loader also verifies that `model.json` is a real TensorFlow.js graph manifest and that every referenced `group*.bin` shard is reachable before enabling Essentia inference.
+
+See [`public/models/README.md`](public/models/README.md) for more details.
+
+If `WASM_SRC` is empty, run `ls node_modules/essentia.js/dist` and copy the `.wasm` file you see there to `public/models/essentia-wasm.module.wasm`.
+
+### 4. Enable OSC in GrandMA3
+
+`Menu → System → Network Protocols → OSC`
+- Enable **OSC Input** (so MA3 receives fader/key messages from the app)
+- Enable **OSC Output** on port `8001` (so the app can receive feedback)
+- Confirm your MA3 machine's IP address
 
 ### 5. Run the app
 

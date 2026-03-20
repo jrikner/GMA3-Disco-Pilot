@@ -35,7 +35,7 @@ npm run check:models
 
 ## What `setup:models` actually downloads
 
-The helper script can automatically:
+If only the `.onnx` file is present, the app now logs a warning and stays on the spectral fallback path instead of repeatedly throwing inference errors. The loader also verifies that `model.json` is a real TensorFlow.js graph manifest and that every referenced `group*.bin` shard is reachable before enabling Essentia inference.
 
 - install `essentia.js` locally with `npm install --no-save essentia.js`
 - copy `node_modules/essentia.js/dist/essentia-wasm.es.js` into this folder
