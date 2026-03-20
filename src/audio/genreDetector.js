@@ -759,6 +759,7 @@ let essentiaModule = null
 let modelLoaded = false
 let audioBuffer = []
 let analysisInterval = null
+let isAnalysisRunning = false  // Prevent overlapping Essentia inferences from setInterval
 let candidateGenre = null
 let candidateCount = 0
 let currentGenre = 'unknown'
@@ -795,6 +796,7 @@ export async function startGenreDetector(audioContext, cb) {
   candidateGenre = null
   candidateCount = 0
   currentGenre = 'unknown'
+  isAnalysisRunning = false
   smoothedGenreScores = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 1 / ALL_GENRES.length]))
 
   if (!audioContext.audioWorklet) {
@@ -825,7 +827,9 @@ export async function startGenreDetector(audioContext, cb) {
 
   processorNode = processor
   processorMessagePort = processor.port
-  analysisInterval = setInterval(() => runAnalysis(), ANALYSIS_INTERVAL_MS)
+  analysisInterval = setInterval(() => {
+    void runAnalysis()
+  }, ANALYSIS_INTERVAL_MS)
 
   return processor
 }
@@ -846,6 +850,7 @@ export function stopGenreDetector() {
     processorNode = null
   }
   callback = null
+  isAnalysisRunning = false
 }
 
 export function getCurrentGenre() {
@@ -864,41 +869,49 @@ export function setGenreRealtimeHint(hint = {}) {
 // ── Core Analysis ─────────────────────────────────────────────────────────────
 
 async function runAnalysis() {
+  if (isAnalysisRunning) return
+
   const minimumWindowSamples = MAEST_CONTEXT_SECONDS * INPUT_SAMPLE_RATE
   if (audioBuffer.length < minimumWindowSamples) return
 
-  const windowSamples = normalizeMonoSamples(audioBuffer.slice(audioBuffer.length - minimumWindowSamples))
+  isAnalysisRunning = true
 
-  let scores
-  if (modelLoaded && essentiaModule) {
-    scores = await runEssentiaModel(windowSamples)
-  } else {
-    scores = spectralHeuristic(windowSamples)
-  }
+  try {
+    const windowSamples = normalizeMonoSamples(audioBuffer.slice(audioBuffer.length - minimumWindowSamples))
 
-  const selection = selectGenre(scores)
-  const { genre } = selection
-
-  // Hysteresis: require HYSTERESIS_WINDOWS consecutive windows of same genre
-  if (genre === candidateGenre) {
-    candidateCount++
-    if (candidateCount >= HYSTERESIS_WINDOWS) {
-      if (genre !== currentGenre) {
-        currentGenre = genre
-        callback?.({
-          genre,
-          confidence: selection.rawConfidence,
-          rawConfidence: selection.rawConfidence,
-          weightedConfidence: selection.weightedConfidence,
-          scores: selection.rawScores,
-          weightedScores: selection.weightedScores,
-          topGenres: selection.topGenres,
-        })
-      }
+    let scores
+    if (modelLoaded && essentiaModule) {
+      scores = await runEssentiaModel(windowSamples)
+    } else {
+      scores = spectralHeuristic(windowSamples)
     }
-  } else {
-    candidateGenre = genre
-    candidateCount = 1
+
+    const selection = selectGenre(scores)
+    const { genre } = selection
+
+    // Hysteresis: require HYSTERESIS_WINDOWS consecutive windows of same genre
+    if (genre === candidateGenre) {
+      candidateCount++
+      if (candidateCount >= HYSTERESIS_WINDOWS) {
+        if (genre !== currentGenre) {
+          currentGenre = genre
+          callback?.({
+            genre,
+            confidence: selection.rawConfidence,
+            rawConfidence: selection.rawConfidence,
+            weightedConfidence: selection.weightedConfidence,
+            scores: selection.rawScores,
+            weightedScores: selection.weightedScores,
+            topGenres: selection.topGenres,
+          })
+        }
+      }
+    } else {
+      candidateGenre = genre
+      candidateCount = 1
+    }
+  } finally {
+    isAnalysisRunning = false
   }
 }
 
