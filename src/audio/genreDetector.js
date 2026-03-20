@@ -37,6 +37,7 @@ const MAEST_GRAPH_FILENAMES = [
   '/models/maest-30s-pw/model',
   'maest-30s-pw',
 ]
+const GENRE_BUFFER_WORKLET_URL = '/worklets/genre-buffer-processor.js'
 
 // ── Genre label mapping ──────────────────────────────────────────────────────
 // Maps Essentia/Discogs style tags → our internal genre IDs
@@ -765,7 +766,8 @@ let realtimeHint = { bpm: 0, centroid: 0, energy: 0, lowBandEnergy: 0 }
 let maestLabels = null
 let smoothedGenreScores = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 1 / ALL_GENRES.length]))
 let processorNode = null
-let silentSinkNode = null
+let processorMessagePort = null
+const loadedWorkletContexts = new WeakSet()
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -782,7 +784,7 @@ export function setContextWeights(contextGenres) {
   }
 }
 
-export function startGenreDetector(audioContext, cb) {
+export async function startGenreDetector(audioContext, cb) {
   callback = cb
   audioBuffer = []
   candidateGenre = null
@@ -790,30 +792,34 @@ export function startGenreDetector(audioContext, cb) {
   currentGenre = 'unknown'
   smoothedGenreScores = Object.fromEntries(ALL_GENRES.map((genre) => [genre, 1 / ALL_GENRES.length]))
 
-  // Tap into audio via ScriptProcessor (deprecated but widely supported in Electron)
-  // For production: use AudioWorklet
-  const processor = audioContext.createScriptProcessor(4096, 1, 1)
-  // ScriptProcessor nodes only receive callbacks when their output is part of
-  // the graph. Route to a muted gain node so we keep processing without
-  // sending monitor audio to speakers.
-  const silentSink = audioContext.createGain()
-  silentSink.gain.value = 0
-
-  processor.onaudioprocess = (e) => {
-    const samples = normalizeMonoSamples(e.inputBuffer.getChannelData(0))
-    audioBuffer.push(...samples)
-    // Keep only last MAEST_CONTEXT_SECONDS worth of audio
-    const maxSamples = MAEST_CONTEXT_SECONDS * INPUT_SAMPLE_RATE
-    if (audioBuffer.length > maxSamples) {
-      audioBuffer = audioBuffer.slice(audioBuffer.length - maxSamples)
-    }
+  if (!audioContext.audioWorklet) {
+    throw new Error('AudioWorklet is unavailable in this environment.')
   }
 
-  processor.connect(silentSink)
-  silentSink.connect(audioContext.destination)
-  processorNode = processor
-  silentSinkNode = silentSink
+  if (!loadedWorkletContexts.has(audioContext)) {
+    await audioContext.audioWorklet.addModule(GENRE_BUFFER_WORKLET_URL)
+    loadedWorkletContexts.add(audioContext)
+  }
 
+  const processor = new AudioWorkletNode(audioContext, 'genre-buffer-processor', {
+    numberOfInputs: 1,
+    numberOfOutputs: 0,
+    channelCount: 1,
+    channelCountMode: 'explicit',
+    channelInterpretation: 'speakers',
+    processorOptions: {
+      chunkSize: 4096,
+    },
+  })
+
+  processor.port.onmessage = (event) => {
+    const samples = normalizeMonoSamples(new Float32Array(event.data))
+    audioBuffer.push(...samples)
+    trimAudioBuffer()
+  }
+
+  processorNode = processor
+  processorMessagePort = processor.port
   analysisInterval = setInterval(() => runAnalysis(), ANALYSIS_INTERVAL_MS)
 
   return processor
@@ -825,14 +831,14 @@ export function stopGenreDetector() {
     analysisInterval = null
   }
   audioBuffer = []
+  if (processorMessagePort) {
+    processorMessagePort.onmessage = null
+    processorMessagePort.close()
+    processorMessagePort = null
+  }
   if (processorNode) {
     processorNode.disconnect()
-    processorNode.onaudioprocess = null
     processorNode = null
-  }
-  if (silentSinkNode) {
-    silentSinkNode.disconnect()
-    silentSinkNode = null
   }
   callback = null
 }
@@ -1158,6 +1164,13 @@ function normalizeLabel(label) {
     .replace(/&/g, ' and ')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
+}
+
+function trimAudioBuffer() {
+  const maxSamples = MAEST_CONTEXT_SECONDS * INPUT_SAMPLE_RATE
+  if (audioBuffer.length > maxSamples) {
+    audioBuffer = audioBuffer.slice(audioBuffer.length - maxSamples)
+  }
 }
 
 function normalizeScoreMap(scoreMap) {
