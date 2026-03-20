@@ -28,28 +28,45 @@ If `WASM_SRC` is empty, run `ls node_modules/essentia.js/dist` and copy whicheve
 
 ## MAEST Model (Optional — for higher accuracy)
 
-The app can use the Discogs MAEST-30s model for 519-class music style classification:
+The app can use the Discogs MAEST-30s model for 519-class music style classification.
+The previous README text about TensorFlow.js `model.json` shards was incorrect for this model source.
 
 | File | Size | Notes |
 |------|------|-------|
-| `maest-30s-pw.onnx` | ~200 MB | ONNX model file |
-| `discogs_519labels.txt` | ~6 KB | Label list used to map MAEST output logits back to style names |
+| `discogs-maest-30s-pw-519l-2.pb` | ~348 MB | Official Essentia frozen graph model used by `TensorflowPredictMAEST` |
+| `discogs-maest-30s-pw-519l-2.json` | ~23 KB | Official Essentia metadata file with class names and inference metadata |
+| `discogs_519labels.txt` | ~6 KB | Optional fallback label list if the metadata JSON is unavailable |
 
 Download with curl:
 
 ```bash
 mkdir -p public/models
-curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" \
-     -o public/models/maest-30s-pw.onnx
-
+curl -L "https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.pb" \
+     -o public/models/discogs-maest-30s-pw-519l-2.pb
+curl -L "https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.json" \
+     -o public/models/discogs-maest-30s-pw-519l-2.json
 curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/discogs_519labels.txt" \
      -o public/models/discogs_519labels.txt
 ```
 
-Or manually: go to [https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l](https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l), click the **↓** icon next to `maest-30s-pw.onnx`, and move the file here.
+Quick verification:
 
-Without this model, Essentia's lower-level audio features still improve detection over
-the pure spectral heuristic fallback.
+```bash
+test -f public/models/discogs-maest-30s-pw-519l-2.pb && \
+test -f public/models/discogs-maest-30s-pw-519l-2.json && \
+echo "MAEST files look present"
+```
+
+Or manually, download these two files from Essentia's model index and place them in `public/models/`:
+
+- `discogs-maest-30s-pw-519l-2.pb`
+- `discogs-maest-30s-pw-519l-2.json`
+
+The standalone Hugging Face repo for `mtg-upf/discogs-maest-30s-pw-129e-519l` does **not** expose the browser-ready `model.json` shards mentioned previously. It exposes a Transformers model package instead, so use the Essentia-hosted `.pb` + `.json` files above for this app.
+
+If only the wrong model artifact is present, the app now logs a warning and stays on the spectral fallback path instead of repeatedly throwing inference errors.
+
+Without this model, the app falls back to the spectral heuristic path.
 
 If `discogs_519labels.txt` is missing, the detector can still run but MAEST predictions
 cannot be reliably mapped to the internal 8 genres.

@@ -104,26 +104,43 @@ WASM_SRC=$(find node_modules/essentia.js/dist -maxdepth 1 -type f -name 'essenti
 cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
 ```
 
-**Optional: MAEST model for highest accuracy (~200 MB)**
+**Optional: MAEST model for highest accuracy (~348 MB)**
 
-This model gives the app full 519-class music style classification instead of the basic heuristic. Download the file directly:
+The current browser pipeline uses Essentia's official **MAEST frozen graph** (`.pb`) plus its metadata `.json`. The previous README was wrong about TensorFlow.js `model.json` files — the official Essentia MAEST release does **not** publish those here.
+
+Download the actual files the app now looks for:
 
 ```bash
 mkdir -p public/models
+curl -L "https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.pb" \
+  -o public/models/discogs-maest-30s-pw-519l-2.pb
+curl -L "https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.json" \
+  -o public/models/discogs-maest-30s-pw-519l-2.json
 ```
+
+Optional fallback labels file:
 
 ```bash
-curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" -o public/models/maest-30s-pw.onnx
+curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/discogs_519labels.txt" \
+  -o public/models/discogs_519labels.txt
 ```
+
+After downloading, you should have at least:
+
+```text
+public/models/discogs-maest-30s-pw-519l-2.pb
+public/models/discogs-maest-30s-pw-519l-2.json
+```
+
+Quick verification:
 
 ```bash
-curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/discogs_519labels.txt" -o public/models/discogs_519labels.txt
+test -f public/models/discogs-maest-30s-pw-519l-2.pb && \
+test -f public/models/discogs-maest-30s-pw-519l-2.json && \
+echo "MAEST files look present"
 ```
 
-Or if you prefer to download it manually:
-1. Go to [https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l](https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l)
-2. Click the **↓** icon next to `maest-30s-pw.onnx` and `discogs_519labels.txt` in the file list
-3. Move the downloaded files to `public/models/`
+If those files are present but your Essentia.js WASM build does not expose `TensorflowPredictMAEST`, the app will log that clearly and stay on the spectral fallback detector instead of throwing opaque inference errors.
 
 See [`public/models/README.md`](public/models/README.md) for more details.
 
@@ -302,7 +319,7 @@ Movement phasers are assigned as **Temp faders** so the app can randomize moveme
 - Open the Audio panel on the dashboard and confirm the BPM and Energy meters are moving — if they're flat, the mic/audio input isn't reaching the app
 - Switch input device using the dropdown at the bottom of the Audio panel
 - Check the browser console (`Cmd+Option+I` in dev mode) for `[GenreDetector]` log messages
-- Add the Essentia model files for significantly better accuracy
+- Add the official Essentia MAEST files (`public/models/discogs-maest-30s-pw-519l-2.pb` and `.json`) for significantly better accuracy
 - Use "Tonight's Context" to hint which genres are actually playing
 
 ### Phasers not moving after running the plugin

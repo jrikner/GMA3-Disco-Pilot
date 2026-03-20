@@ -19,7 +19,8 @@
  * NOTE: Essentia.js WASM and model files must be placed in /public/models/
  * Required files:
  *   - /public/models/essentia-wasm.module.wasm
- *   - /public/models/maest-30s-pw.onnx (or TF.js model files)
+ *   - /public/models/discogs-maest-30s-pw-519l-2.pb
+ *   - /public/models/discogs-maest-30s-pw-519l-2.json
  *
  * Until the model is loaded, genre detection falls back to spectral heuristics.
  */
@@ -31,11 +32,11 @@ const GENRE_MARGIN_THRESHOLD = 0.06  // Lowered from 0.08 — more labels = smal
 const HYSTERESIS_WINDOWS = 2
 const INPUT_SAMPLE_RATE = 44100
 const MODEL_SAMPLE_RATE = 16000
+const MAEST_MODEL_METADATA_URL = '/models/discogs-maest-30s-pw-519l-2.json'
 const MAEST_LABELS_URL = '/models/discogs_519labels.txt'
 const MAEST_GRAPH_FILENAMES = [
-  '/models/maest-30s-pw',
-  '/models/maest-30s-pw/model',
-  'maest-30s-pw',
+  '/models/discogs-maest-30s-pw-519l-2.pb',
+  '/models/discogs-maest-30s-pw-519l-1.pb',
 ]
 const GENRE_BUFFER_WORKLET_URL = '/worklets/genre-buffer-processor.js'
 
@@ -769,6 +770,9 @@ let processorNode = null
 let processorMessagePort = null
 const loadedWorkletContexts = new WeakSet()
 let essentiaLoadPromise = null
+let availableMaestGraphFilename = null
+let essentiaInferenceDisabledReason = null
+let maestModelMetadata = null
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -1010,7 +1014,7 @@ function applySpectralBias(scoreMap) {
 // ── Essentia.js Model (loads asynchronously) ──────────────────────────────────
 
 async function loadEssentia() {
-  if (modelLoaded || essentiaModule) return
+  if (modelLoaded) return
   if (essentiaLoadPromise) {
     await essentiaLoadPromise
     return
@@ -1037,21 +1041,39 @@ async function loadEssentia() {
       }
 
       essentiaModule = createEssentiaRuntime(wasmModule)
-      maestLabels = await loadMaestLabels()
-      modelLoaded = Boolean(essentiaModule && maestLabels?.length)
+      maestModelMetadata = await loadMaestModelMetadata()
+      maestLabels = maestModelMetadata?.classes?.length ? maestModelMetadata.classes : await loadMaestLabels()
+      availableMaestGraphFilename = await resolveAvailableMaestGraphFilename()
+      modelLoaded = Boolean(
+        essentiaModule &&
+        maestLabels?.length &&
+        availableMaestGraphFilename &&
+        typeof essentiaModule.TensorflowPredictMAEST === 'function'
+      )
 
-      if (!modelLoaded) {
-        console.warn('[GenreDetector] Essentia loaded but MAEST labels are missing or incompatible with prediction output format; enabling spectral heuristic fallback.')
+      if (!maestLabels?.length) {
+        console.warn('[GenreDetector] Essentia loaded but MAEST labels/metadata are missing or incompatible with the prediction output format; enabling spectral heuristic fallback.')
         return
       }
 
-      console.log('[GenreDetector] Essentia.js loaded successfully', `(labels: ${maestLabels.length})`)
+      if (!availableMaestGraphFilename) {
+        console.warn('[GenreDetector] Essentia loaded, but no compatible MAEST model file was found in /public/models/. Falling back to spectral heuristic. Expected /models/discogs-maest-30s-pw-519l-2.pb.')
+        return
+      }
+
+      if (typeof essentiaModule.TensorflowPredictMAEST !== 'function') {
+        console.warn('[GenreDetector] This Essentia.js build does not expose TensorflowPredictMAEST, so the MAEST model cannot run in-browser. Falling back to the spectral heuristic.')
+        return
+      }
+
+      console.log('[GenreDetector] Essentia.js loaded successfully', `(labels: ${maestLabels.length}, graph: ${availableMaestGraphFilename}, algorithm: TensorflowPredictMAEST)`)
     } catch (err) {
-      console.warn('[GenreDetector] Could not load Essentia.js:', err.message)
+      console.warn('[GenreDetector] Could not load Essentia.js:', formatErrorMessage(err))
     }
   })()
 
   await essentiaLoadPromise
+  essentiaLoadPromise = null
 }
 
 async function initializeEssentiaWasm(importedModule) {
@@ -1111,6 +1133,12 @@ function createEssentiaRuntime(wasmModule) {
     TensorflowPredict2D(features, options) {
       return algorithms.TensorflowPredict2D(features, options)
     },
+    TensorflowPredictMAEST(signal, options) {
+      if (typeof algorithms.TensorflowPredictMAEST !== 'function') {
+        throw new Error('TensorflowPredictMAEST is unavailable in this Essentia.js build')
+      }
+      return algorithms.TensorflowPredictMAEST(signal, options)
+    },
     delete() {
       if (typeof algorithms.delete === 'function') algorithms.delete()
     },
@@ -1136,19 +1164,42 @@ async function loadMaestLabels() {
   }
 }
 
+async function loadMaestModelMetadata() {
+  try {
+    const response = await fetch(MAEST_MODEL_METADATA_URL)
+    if (!response.ok) return null
+
+    const metadata = await response.json()
+    if (!metadata || typeof metadata !== 'object') return null
+
+    const classes = Array.isArray(metadata.classes)
+      ? metadata.classes.map((label) => normalizeLabel(label)).filter(Boolean)
+      : null
+
+    return {
+      ...metadata,
+      classes,
+    }
+  } catch {
+    return null
+  }
+}
+
 async function runEssentiaModel(samples) {
+  if (essentiaInferenceDisabledReason) {
+    return spectralHeuristic(samples)
+  }
+
+  let vectorInput = null
+
   try {
     const essentia = essentiaModule
     const resampled = resampleWithFilter(samples, INPUT_SAMPLE_RATE, MODEL_SAMPLE_RATE)
     const normalized = normalizeMonoSamples(resampled)
-    const vectorInput = essentia.arrayToVector(new Float32Array(normalized))
+    vectorInput = essentia.arrayToVector(new Float32Array(normalized))
 
-    // Feature extraction
-    const features = essentia.TensorflowInputMusiCNN(vectorInput)
-
-    // Model inference (requires loaded TF.js model)
-    // This is a simplified call — actual Essentia.js API varies by version
-    const predictions = await predictMaest(essentia, features)
+    // Model inference using Essentia's MAEST wrapper over the official MAEST .pb graph.
+    const predictions = await predictMaest(essentia, vectorInput)
     if (!predictions.length) {
       console.warn('[GenreDetector] MAEST prediction parsing produced no label/score pairs; falling back to spectral heuristic.')
       return spectralHeuristic(samples)
@@ -1156,25 +1207,108 @@ async function runEssentiaModel(samples) {
 
     return mapEssentiaToGenres(predictions)
   } catch (err) {
-    console.warn('[GenreDetector] Model inference failed:', err.message)
+    const errorMessage = formatErrorMessage(err)
+    essentiaInferenceDisabledReason = errorMessage
+    modelLoaded = false
+    console.warn(`[GenreDetector] Model inference failed (${errorMessage}). Disabling Essentia inference for the rest of this session and falling back to the spectral heuristic.`)
     return spectralHeuristic(samples)
+  } finally {
+    safeDeleteEssentiaObject(vectorInput)
   }
 }
 
-async function predictMaest(essentia, features) {
-  let lastError = null
+async function predictMaest(essentia, signal) {
+  if (!availableMaestGraphFilename) {
+    throw new Error('No compatible MAEST graph model is available')
+  }
 
-  for (const graphFilename of MAEST_GRAPH_FILENAMES) {
-    try {
-      const predictions = await essentia.TensorflowPredict2D(features, { graphFilename })
-      const parsed = parsePredictionOutput(predictions)
-      if (parsed.length > 0) return parsed
-    } catch (err) {
-      lastError = err
+  try {
+    const predictions = await essentia.TensorflowPredictMAEST(signal, { graphFilename: availableMaestGraphFilename })
+    const parsed = parsePredictionOutput(predictions)
+    if (parsed.length > 0) return parsed
+    throw new Error('MAEST prediction output was empty or could not be parsed')
+  } catch (err) {
+    throw new Error(`Graph ${availableMaestGraphFilename} failed: ${formatErrorMessage(err)}`)
+  }
+}
+
+
+async function resolveAvailableMaestGraphFilename() {
+  const metadataLink = maestModelMetadata?.link
+  if (typeof metadataLink === 'string') {
+    const pathname = extractPathname(metadataLink)
+    if (pathname) {
+      const preferredLocalPath = pathname.startsWith('/models/')
+        ? pathname
+        : `/models/${pathname.split('/').pop()}`
+
+      if (await urlExists(preferredLocalPath)) {
+        return preferredLocalPath
+      }
     }
   }
 
-  throw new Error(lastError?.message || 'No valid MAEST model prediction output')
+  for (const candidate of MAEST_GRAPH_FILENAMES) {
+    if (!looksLikeHttpPath(candidate)) continue
+    if (await urlExists(candidate)) return candidate
+  }
+
+  return null
+}
+
+function extractPathname(value) {
+  try {
+    return new URL(value, window.location.origin).pathname
+  } catch {
+    return null
+  }
+}
+
+async function urlExists(candidate) {
+  try {
+    const response = await fetch(candidate, { method: 'HEAD' })
+    if (response.ok) return true
+
+    if (response.status === 405) {
+      const getResponse = await fetch(candidate, { method: 'GET' })
+      return getResponse.ok
+    }
+  } catch {
+    // Ignore network/probing failures.
+  }
+
+  return false
+}
+
+function looksLikeHttpPath(candidate) {
+  return typeof candidate === 'string' && (candidate.startsWith('/') || candidate.startsWith('http://') || candidate.startsWith('https://'))
+}
+
+function formatErrorMessage(err) {
+  if (err instanceof Error && err.message) return err.message
+  if (typeof err === 'string' && err) return err
+  if (err && typeof err === 'object' && 'message' in err && typeof err.message === 'string' && err.message) return err.message
+
+  try {
+    const serialized = JSON.stringify(err)
+    if (serialized && serialized !== '{}') return serialized
+  } catch {
+    // Ignore JSON serialization failures.
+  }
+
+  if (err === undefined) return 'unknown error (received undefined)'
+  if (err === null) return 'unknown error (received null)'
+  return String(err)
+}
+
+function safeDeleteEssentiaObject(value) {
+  if (!value || typeof value.delete !== 'function') return
+
+  try {
+    value.delete()
+  } catch {
+    // Ignore delete failures from third-party WASM objects.
+  }
 }
 
 function parsePredictionOutput(predictions) {
