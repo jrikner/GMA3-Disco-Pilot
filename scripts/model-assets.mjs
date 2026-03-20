@@ -113,7 +113,7 @@ async function runSetup() {
   }
 
   console.log('\nNote: this repo does not ship the MAEST TensorFlow.js graph export, so setup cannot create public/models/maest-30s-pw/model.json for you.')
-  console.log('If you only have maest-30s-pw.onnx, the app will continue using the fallback detector because the browser code expects a TensorFlow.js graph model manifest plus weight shards.')
+  console.log('If you only have maest-30s-pw.onnx, the app will continue using the fallback detector because the browser code expects a TensorFlow.js graph model manifest plus weight shards. If you have the official frozen .pb + metadata .json pair, run `npm run convert:maest -- /path/to/model.pb /path/to/model.json` to generate public/models/maest-30s-pw/model.json and its shards.')
 }
 
 async function main() {

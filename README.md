@@ -166,11 +166,11 @@ The wizard generates the LUA/XML plugin files for you; those downloads are unrel
 
 ### `npm run setup:models` finishes, but there is still no `model.json`
 
-That is normal. The setup helper only installs/copies what can be sourced automatically from `essentia.js` plus the public label text file. The MAEST TensorFlow.js graph export is still a manual add-on.
+That is normal. The setup helper only installs/copies what can be sourced automatically from `essentia.js` plus the public label text file. The MAEST TensorFlow.js graph export is still a manual add-on, but you can now generate it from the official frozen graph + metadata JSON with `npm run convert:maest -- /path/to/model.pb /path/to/model.json`.
 
 ### I only have `maest-30s-pw.onnx`
 
-The app will not load it directly. Right now the renderer expects a TensorFlow.js graph model manifest and its shard files, not ONNX.
+The app will not load it directly. Right now the renderer expects a TensorFlow.js graph model manifest and its shard files, not ONNX. If you have the official frozen `.pb` plus its metadata `.json`, run `npm run convert:maest -- /path/to/model.pb /path/to/model.json` to generate the browser assets in `public/models/maest-30s-pw/`.
 
 ### `npm run check:models` says runtime files are missing
 

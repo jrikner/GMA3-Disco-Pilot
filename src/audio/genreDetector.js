@@ -31,7 +31,7 @@ const GENRE_MARGIN_THRESHOLD = 0.06  // Lowered from 0.08 — more labels = smal
 const HYSTERESIS_WINDOWS = 2
 const INPUT_SAMPLE_RATE = 44100
 const MODEL_SAMPLE_RATE = 16000
-const MAEST_LABELS_URL = '/models/discogs_519labels.txt'
+const DEFAULT_MAEST_LABELS_URL = '/models/discogs_519labels.txt'
 const MAEST_GRAPH_FILENAMES = [
   '/models/maest-30s-pw/model.json',
   '/models/maest-30s-pw/model',
@@ -773,6 +773,7 @@ let processorMessagePort = null
 const loadedWorkletContexts = new WeakSet()
 let essentiaLoadPromise = null
 let availableMaestGraphFilename = null
+let availableMaestLabelsUrl = DEFAULT_MAEST_LABELS_URL
 let essentiaInferenceDisabledReason = null
 let detectorStatus = {
   mode: 'heuristic',
@@ -1073,15 +1074,17 @@ async function loadEssentia() {
       }
 
       essentiaModule = createEssentiaRuntime(wasmModule)
-      maestLabels = await loadMaestLabels()
-      availableMaestGraphFilename = await resolveAvailableMaestGraphFilename()
+      const availableMaestGraph = await resolveAvailableMaestGraph()
+      availableMaestGraphFilename = availableMaestGraph?.filename || null
+      availableMaestLabelsUrl = availableMaestGraph?.labelsUrl || DEFAULT_MAEST_LABELS_URL
+      maestLabels = await loadMaestLabels(availableMaestLabelsUrl)
       modelLoaded = Boolean(essentiaModule && maestLabels?.length && availableMaestGraphFilename)
 
       if (!maestLabels?.length) {
         detectorStatus = {
           mode: 'heuristic',
           reason: 'missing_labels',
-          detail: 'Essentia loaded, but discogs_519labels.txt is missing or incompatible. Run npm run setup:models or copy the label file into public/models/.',
+          detail: `Essentia loaded, but ${availableMaestLabelsUrl.split('/').pop()} is missing or incompatible. Run npm run setup:models, npm run convert:maest, or copy the label file into public/models/.`,
         }
         console.warn('[GenreDetector] Essentia loaded but MAEST labels are missing or incompatible with prediction output format; enabling spectral heuristic fallback.')
         return
@@ -1182,9 +1185,9 @@ function createEssentiaRuntime(wasmModule) {
   }
 }
 
-async function loadMaestLabels() {
+async function loadMaestLabels(labelsUrl = DEFAULT_MAEST_LABELS_URL) {
   try {
-    const response = await fetch(MAEST_LABELS_URL)
+    const response = await fetch(labelsUrl)
     if (!response.ok) return null
     const text = await response.text()
     const labels = text
@@ -1256,7 +1259,7 @@ async function predictMaest(essentia, features) {
 }
 
 
-async function resolveAvailableMaestGraphFilename() {
+async function resolveAvailableMaestGraph() {
   for (const candidate of MAEST_GRAPH_FILENAMES) {
     const normalizedCandidate = normalizeGraphCandidate(candidate)
     if (!looksLikeHttpPath(normalizedCandidate)) continue
@@ -1271,7 +1274,11 @@ async function resolveAvailableMaestGraphFilename() {
         continue
       }
 
-      return normalizedCandidate
+      return {
+        filename: normalizedCandidate,
+        manifest,
+        labelsUrl: getLabelsUrlFromGraphManifest(manifest),
+      }
     } catch (err) {
       console.warn(`[GenreDetector] Ignoring MAEST graph ${normalizedCandidate} because it is not a valid TensorFlow.js graph model: ${formatErrorMessage(err)}`)
     }
@@ -1335,6 +1342,14 @@ async function findMissingWeightShard(graphFilename, manifest) {
   }
 
   return null
+}
+
+
+function getLabelsUrlFromGraphManifest(manifest) {
+  const labelFile = manifest?.userDefinedMetadata?.labelsFile
+  if (typeof labelFile !== 'string' || !labelFile.trim()) return DEFAULT_MAEST_LABELS_URL
+  if (labelFile.startsWith('/')) return labelFile
+  return `/models/${labelFile.replace(/^\.\//, '')}`
 }
 
 async function checkStaticAssetAvailability(url) {

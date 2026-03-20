@@ -48,7 +48,7 @@ It does **not** create `maest-30s-pw/model.json`, because this repo does not inc
 
 The browser loader in `src/audio/genreDetector.js` expects a TensorFlow.js graph model export, not a standalone ONNX file. So even if you have `maest-30s-pw.onnx`, the app will not use it directly.
 
-If you want full graph inference, manually place a compatible TensorFlow.js export here:
+If you want full graph inference, either manually place a compatible TensorFlow.js export here or generate one from the official frozen graph + metadata JSON with `npm run convert:maest -- /path/to/model.pb /path/to/model.json`:
 
 ```text
 public/models/maest-30s-pw/model.json

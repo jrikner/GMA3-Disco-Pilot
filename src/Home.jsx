@@ -98,11 +98,12 @@ export default function Home() {
         }}>
           <strong style={{ color: '#f59e0b' }}>Genre detection running in heuristic mode.</strong>
           <br />
-          For higher accuracy, run <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>npm run setup:models</code> and add the MAEST TensorFlow.js graph files to{' '}
+          For higher accuracy, run <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>npm run setup:models</code>, then either copy a MAEST TensorFlow.js export into{' '}
           <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>
             public/models/
-          </code>
-          — see <code>public/models/README.md</code> for instructions.
+          </code>{' '}
+          or generate one from the official frozen graph with <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>npm run convert:maest -- /path/to/model.pb /path/to/model.json</code>.
+          See <code>public/models/README.md</code> for instructions.
         </div>
       )}
 
