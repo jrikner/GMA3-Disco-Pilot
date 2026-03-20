@@ -79,34 +79,82 @@ function sendMicrophonePermissionState() {
   }
 }
 
-function isTrustedAppRequest(webContents, requestingOrigin = '') {
+function normalizeAppUrl(value = '') {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function isTrustedAppUrl(value = '') {
+  const normalized = normalizeAppUrl(value)
+  if (!normalized) return false
+
+  if (isDev) {
+    return normalized.startsWith('http://localhost:5173') || normalized.startsWith('http://127.0.0.1:5173')
+  }
+
+  return normalized === 'file://' || normalized.startsWith('file://')
+}
+
+function isTrustedAppRequest(webContents, details = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return false
   if (webContents !== mainWindow.webContents) return false
 
-  if (isDev) {
-    return requestingOrigin.startsWith('http://localhost:5173') || requestingOrigin.startsWith('http://127.0.0.1:5173')
+  const candidateUrls = [
+    details.requestingOrigin,
+    details.securityOrigin,
+    details.embeddingOrigin,
+    details.requestingUrl,
+    typeof webContents.getURL === 'function' ? webContents.getURL() : '',
+  ]
+
+  if (candidateUrls.some(isTrustedAppUrl)) {
+    return true
   }
 
-  return requestingOrigin === 'file://' || requestingOrigin.startsWith('file://')
+  if (!isDev) {
+    return candidateUrls.every((value) => !normalizeAppUrl(value))
+  }
+
+  return false
+}
+
+function updateDeniedMicrophonePermission() {
+  microphonePermissionState = {
+    granted: false,
+    error: 'Microphone access was denied in macOS. Enable microphone access for GMA3 Disco Pilot in System Settings → Privacy & Security → Microphone.',
+  }
+  sendMicrophonePermissionState()
 }
 
 function registerPermissionHandlers() {
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details = {}) => {
-    if ((permission === 'media' || permission === 'audioCapture') && isTrustedAppRequest(webContents, details.requestingOrigin || '')) {
-      const allowed = microphonePermissionState.granted !== false
-      if (!allowed) {
-        microphonePermissionState = {
-          granted: false,
-          error: 'Microphone access was denied in macOS. Enable microphone access for GMA3 Disco Pilot in System Settings → Privacy & Security → Microphone.',
-        }
-        sendMicrophonePermissionState()
+  const permissionHandler = (webContents, permission, callback, details = {}) => {
+    if (permission === 'media' || permission === 'audioCapture') {
+      const trustedRequest = isTrustedAppRequest(webContents, details)
+      const allowed = trustedRequest && microphonePermissionState.granted !== false
+      if (trustedRequest && !allowed) {
+        updateDeniedMicrophonePermission()
       }
       callback(allowed)
       return
     }
 
     callback(false)
-  })
+  }
+
+  const permissionCheckHandler = (webContents, permission, requestingOrigin, details = {}) => {
+    if (permission === 'media' || permission === 'audioCapture') {
+      const trustedRequest = isTrustedAppRequest(webContents, { ...details, requestingOrigin })
+      const allowed = trustedRequest && microphonePermissionState.granted !== false
+      if (trustedRequest && !allowed) {
+        updateDeniedMicrophonePermission()
+      }
+      return allowed
+    }
+
+    return false
+  }
+
+  session.defaultSession.setPermissionRequestHandler(permissionHandler)
+  session.defaultSession.setPermissionCheckHandler(permissionCheckHandler)
 }
 
 async function requestMicrophoneAccess() {

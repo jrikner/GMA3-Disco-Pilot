@@ -358,6 +358,7 @@ Without Essentia files, the app will still run with the spectral fallback detect
 
 - Run `npm run dev` from Terminal and watch the output — the Electron log will show the error
 - If it's a permissions error on the microphone: `System Preferences → Security & Privacy → Privacy → Microphone` → enable Terminal or Electron
+- Packaged macOS builds now treat app-owned `file://` microphone requests as trusted too, so if Sound In still shows `permission denied`, fully quit and relaunch the app once after updating so macOS and Electron re-check the permission state
 
 ---
 
