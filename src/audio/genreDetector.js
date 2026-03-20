@@ -774,6 +774,11 @@ const loadedWorkletContexts = new WeakSet()
 let essentiaLoadPromise = null
 let availableMaestGraphFilename = null
 let essentiaInferenceDisabledReason = null
+let detectorStatus = {
+  mode: 'heuristic',
+  reason: 'initializing',
+  detail: 'Genre detector is still initializing.',
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -856,6 +861,10 @@ export function stopGenreDetector() {
 export function getCurrentGenre() {
   return currentGenre
 }
+export function getGenreDetectorStatus() {
+  return { ...detectorStatus }
+}
+
 export function setGenreRealtimeHint(hint = {}) {
   realtimeHint = {
     bpm: hint.bpm ?? realtimeHint.bpm,
@@ -1043,12 +1052,22 @@ async function loadEssentia() {
       const essentiaUrl = new URL('/models/essentia-wasm.es.js', window.location.origin).href
       const importedModule = await import(/* @vite-ignore */ essentiaUrl).catch(() => null)
       if (!importedModule) {
-        console.warn('[GenreDetector] Essentia.js not found in /public/models/ — using spectral heuristic fallback')
+        detectorStatus = {
+          mode: 'heuristic',
+          reason: 'missing_runtime',
+          detail: 'Essentia runtime files were not found in /public/models/. Run npm run setup:models to copy the browser runtime bundle.',
+        }
+        console.warn('[GenreDetector] Essentia.js not found in /public/models/ — using spectral heuristic fallback. Run `npm run setup:models` to install the runtime files.')
         return
       }
 
       const wasmModule = await initializeEssentiaWasm(importedModule)
       if (!wasmModule) {
+        detectorStatus = {
+          mode: 'heuristic',
+          reason: 'invalid_runtime',
+          detail: 'Essentia runtime files were found, but the browser module did not expose a compatible WASM API.',
+        }
         console.warn('[GenreDetector] Essentia.js module loaded, but no compatible WASM export was found — using spectral heuristic fallback')
         return
       }
@@ -1059,17 +1078,37 @@ async function loadEssentia() {
       modelLoaded = Boolean(essentiaModule && maestLabels?.length && availableMaestGraphFilename)
 
       if (!maestLabels?.length) {
+        detectorStatus = {
+          mode: 'heuristic',
+          reason: 'missing_labels',
+          detail: 'Essentia loaded, but discogs_519labels.txt is missing or incompatible. Run npm run setup:models or copy the label file into public/models/.',
+        }
         console.warn('[GenreDetector] Essentia loaded but MAEST labels are missing or incompatible with prediction output format; enabling spectral heuristic fallback.')
         return
       }
 
       if (!availableMaestGraphFilename) {
-        console.warn('[GenreDetector] Essentia loaded, but no compatible MAEST TensorFlow graph model was found in /public/models/. Falling back to spectral heuristic. Expected a TensorFlow.js graph model such as /models/maest-30s-pw/model.json.')
+        detectorStatus = {
+          mode: 'heuristic',
+          reason: 'missing_graph',
+          detail: 'Essentia loaded, but no TensorFlow.js MAEST graph model was found. Add public/models/maest-30s-pw/model.json plus every referenced group*.bin shard. A standalone .onnx file is not enough.',
+        }
+        console.warn('[GenreDetector] Essentia loaded, but no compatible MAEST TensorFlow graph model was found in /public/models/. Falling back to spectral heuristic. Expected a TensorFlow.js graph model such as /models/maest-30s-pw/model.json. A standalone .onnx file is not sufficient.')
         return
       }
 
+      detectorStatus = {
+        mode: 'maest',
+        reason: 'ready',
+        detail: `Essentia and the MAEST graph are loaded (${availableMaestGraphFilename}).`,
+      }
       console.log('[GenreDetector] Essentia.js loaded successfully', `(labels: ${maestLabels.length}, graph: ${availableMaestGraphFilename})`)
     } catch (err) {
+      detectorStatus = {
+        mode: 'heuristic',
+        reason: 'load_error',
+        detail: `Essentia could not be loaded: ${err.message}`,
+      }
       console.warn('[GenreDetector] Could not load Essentia.js:', err.message)
     }
   })()
@@ -1188,6 +1227,11 @@ async function runEssentiaModel(samples) {
     const errorMessage = formatErrorMessage(err)
     essentiaInferenceDisabledReason = errorMessage
     modelLoaded = false
+    detectorStatus = {
+      mode: 'heuristic',
+      reason: 'inference_failed',
+      detail: `MAEST inference failed and was disabled for this session: ${errorMessage}`,
+    }
     console.warn(`[GenreDetector] Model inference failed (${errorMessage}). Disabling Essentia inference for the rest of this session and falling back to the spectral heuristic.`)
     return spectralHeuristic(samples)
   } finally {

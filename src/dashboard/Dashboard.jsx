@@ -14,7 +14,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import useStore from '../store/appState.js'
 import { startCapture, stopCapture, listAudioDevices, getInputGain, setInputGain as applyInputGain } from '../audio/capture.js'
 import { startBPMDetector, stopBPMDetector } from '../audio/bpmDetector.js'
-import { initGenreDetector, startGenreDetector, stopGenreDetector, setContextWeights, setGenreRealtimeHint } from '../audio/genreDetector.js'
+import { initGenreDetector, startGenreDetector, stopGenreDetector, setContextWeights, setGenreRealtimeHint, getGenreDetectorStatus } from '../audio/genreDetector.js'
 import * as profileMapper from '../profiles/profileMapper.js'
 import { getProfile, ALL_GENRES, TONIGHT_CONTEXTS } from '../profiles/genreProfiles.js'
 import * as oscClient from '../osc/client.js'
@@ -139,6 +139,7 @@ export default function Dashboard() {
       setInputGain(initialGain)
 
       await initGenreDetector(liveContexts)
+      updateLive({ genreDetectorStatus: getGenreDetectorStatus() })
 
       await startBPMDetector(audioContext, sourceNode, (frame) => {
         if (overrides.holdFreeze) return
@@ -204,7 +205,11 @@ export default function Dashboard() {
         genreProcessorRef.current = genreProcessor
       }
 
-      updateLive({ isCapturing: true, audioError: null })
+      updateLive({
+        isCapturing: true,
+        audioError: null,
+        genreDetectorStatus: getGenreDetectorStatus(),
+      })
     } catch (err) {
       console.error('Failed to start audio:', err)
       genreProcessorRef.current = null
@@ -509,6 +514,12 @@ export default function Dashboard() {
         {live.audioError && (
           <div style={{ marginBottom: 12, color: '#fca5a5', fontSize: 11, lineHeight: 1.4 }}>
             {live.audioError}
+          </div>
+        )}
+
+        {live.genreDetectorStatus?.mode === 'heuristic' && (
+          <div style={{ marginBottom: 12, color: '#fbbf24', fontSize: 11, lineHeight: 1.45 }}>
+            <strong>Genre detector fallback:</strong> {live.genreDetectorStatus.detail}
           </div>
         )}
 
