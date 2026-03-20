@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build && electron-builder",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:bpm": "node scripts/test-bpm-detection.mjs"
   },
   "dependencies": {
     "meyda": "^5.6.2",
