@@ -7,7 +7,9 @@
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build && electron-builder",
     "preview": "vite preview",
-    "test:bpm": "node scripts/test-bpm-detection.mjs"
+    "test:bpm": "node scripts/test-bpm-detection.mjs",
+    "setup:models": "npm install --no-save essentia.js && node scripts/model-assets.mjs",
+    "check:models": "node scripts/model-assets.mjs check"
   },
   "dependencies": {
     "meyda": "^5.6.2",
