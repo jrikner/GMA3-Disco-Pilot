@@ -1030,13 +1030,13 @@ async function loadEssentia() {
         return
       }
 
-      const factory = resolveEssentiaFactory(importedModule)
-      if (!factory) {
-        console.warn('[GenreDetector] Essentia.js module loaded, but no compatible factory export was found — using spectral heuristic fallback')
+      const wasmModule = await initializeEssentiaWasm(importedModule)
+      if (!wasmModule) {
+        console.warn('[GenreDetector] Essentia.js module loaded, but no compatible WASM export was found — using spectral heuristic fallback')
         return
       }
 
-      essentiaModule = await factory()
+      essentiaModule = createEssentiaRuntime(wasmModule)
       maestLabels = await loadMaestLabels()
       modelLoaded = Boolean(essentiaModule && maestLabels?.length)
 
@@ -1054,10 +1054,12 @@ async function loadEssentia() {
   await essentiaLoadPromise
 }
 
-function resolveEssentiaFactory(importedModule) {
+async function initializeEssentiaWasm(importedModule) {
   const candidates = [
     importedModule,
     importedModule?.default,
+    importedModule?.EssentiaWASM,
+    importedModule?.default?.EssentiaWASM,
     importedModule?.EssentiaModule,
     importedModule?.createEssentiaModule,
     importedModule?.default?.default,
@@ -1066,12 +1068,56 @@ function resolveEssentiaFactory(importedModule) {
   ]
 
   for (const candidate of candidates) {
+    if (!candidate) continue
+
     if (typeof candidate === 'function') {
+      const initialized = await candidate()
+      if (isEssentiaWasmModule(initialized)) return initialized
+      continue
+    }
+
+    if (isEssentiaWasmModule(candidate)) {
       return candidate
     }
   }
 
   return null
+}
+
+function isEssentiaWasmModule(candidate) {
+  return Boolean(
+    candidate &&
+    typeof candidate.arrayToVector === 'function' &&
+    typeof candidate.vectorToArray === 'function' &&
+    typeof candidate.EssentiaJS === 'function'
+  )
+}
+
+function createEssentiaRuntime(wasmModule) {
+  const algorithms = new wasmModule.EssentiaJS(false)
+
+  return {
+    module: wasmModule,
+    algorithms,
+    arrayToVector(inputArray) {
+      return wasmModule.arrayToVector(inputArray)
+    },
+    vectorToArray(vector) {
+      return wasmModule.vectorToArray(vector)
+    },
+    TensorflowInputMusiCNN(frame) {
+      return algorithms.TensorflowInputMusiCNN(frame)
+    },
+    TensorflowPredict2D(features, options) {
+      return algorithms.TensorflowPredict2D(features, options)
+    },
+    delete() {
+      if (typeof algorithms.delete === 'function') algorithms.delete()
+    },
+    shutdown() {
+      if (typeof algorithms.shutdown === 'function') algorithms.shutdown()
+    },
+  }
 }
 
 async function loadMaestLabels() {
