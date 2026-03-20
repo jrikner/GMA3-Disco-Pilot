@@ -1,119 +1,77 @@
 # GMA3 Disco Pilot
 
-An AI-driven music genre detection system that automatically controls GrandMA3 lighting in real time. It listens to the music playing in the room, identifies the genre every 5 seconds, and fires the right lighting look — color temperature, phaser effects, strobe, movement speed — all mapped to genre profiles you configure once and never think about again.
-
-Built as a macOS Electron app with a full-screen live operator dashboard. An iPad on the same network can mirror the dashboard and send control commands via WebSocket.
+An Electron control app that listens to venue audio, estimates genre/BPM/energy on-device, and drives GrandMA3 looks over OSC. The renderer can use Essentia.js + the Discogs MAEST label set for higher-accuracy music classification, but the app always has a built-in heuristic fallback so you can still launch and program without the full model bundle.
 
 ---
 
-## What it does
+## What this repo includes
 
-```
-Audio in → Genre detection → OSC to GrandMA3 → Lighting out
-```
+The repo already contains the application source, Electron shell, OSC bridge, MA3 plugin generators, and UI. After `npm install`, you have everything needed to **run the app itself**.
 
-Every 5 seconds the app analyses the last 15 seconds of audio using [Essentia.js](https://mtg.github.io/essentia.js/) (Discogs MAEST-30s model with 519 music-style classes). It maps those predictions to 8 genre categories, applies hysteresis so it doesn't flicker, then sends OSC fader and key messages to a set of sequences and phasers already loaded in your MA3 show.
+What is **not** committed to Git is the optional model payload that lives under `public/models/` at runtime:
 
-**8 Genre profiles, pre-tuned:**
+- `essentia-wasm.es.js`
+- `essentia-wasm.module.wasm`
+- `discogs_519labels.txt`
+- `maest-30s-pw/model.json` plus every `group*.bin` shard it references
 
-| Genre | Color | Movement | Strobe |
-|---|---|---|---|
-| Techno | Cold blue / cyan | P/T fast, dim pulse | Yes |
-| EDM / House | Purple / cyan / yellow | P/T fast, color chase, dim pulse | Yes |
-| Hip-Hop / R&B | Deep purple / gold | P/T slow only | No |
-| Pop / Dance | Pink / sky blue / green | Color chase | No |
-| 80s / New Wave | Magenta / cyan / gold | Color chase, dim pulse | No |
-| Latin / Afrobeats | Orange / green / gold | P/T slow, color chase | No |
-| Rock | Red / blue / white | P/T fast, dim pulse | Yes |
-| Corporate / Ambient | Warm white | Nothing | No |
+Those files are omitted because they are generated/distributed outside this repo, and the MAEST TensorFlow.js export is large.
 
-Each profile controls: color look sequence, active phasers (P/T slow, P/T fast, color chase, dimmer pulse), BPM rate master, effect size master, and strobe.
+### Why you do not see `.json` files in the repo
+
+You are not missing a hidden folder: this repository does **not** ship `public/models/maest-30s-pw/model.json`. The current app only uses that file if **you** add an external **TensorFlow.js graph model export**. A standalone `maest-30s-pw.onnx` file is **not** enough for the browser pipeline in `src/audio/genreDetector.js`. The app will fall back to the spectral detector instead.
 
 ---
 
-## Requirements
-
-- **macOS** (Electron app; Linux/Windows possible but untested)
-- **GrandMA3** v2.x (software or console) on the same network
-- **OSC** enabled on MA3 (port 8000 by default)
-- Audio interface or built-in mic routed from the venue PA
-
----
-
-## Getting Started
-
-### 0. Clone the repo and go to the project folder
-
-Open Terminal, then run each command one line at a time:
-
-```bash
-cd ~/Desktop
-```
-
-```bash
-git clone https://github.com/jrikner/GMA3-Disco-Pilot.git
-```
-
-```bash
-cd GMA3-Disco-Pilot
-```
-
-```bash
-pwd
-```
-
-You should now be inside the repo root (`.../GMA3-Disco-Pilot`). Run all `npm` commands from this folder.
+## Quick start
 
 ### 1. Install Node.js
 
-macOS does not come with Node.js pre-installed. The easiest way is [Homebrew](https://brew.sh):
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
+Use the current Node.js LTS release. On macOS, Homebrew is the easiest route:
 
 ```bash
 brew install node
 ```
 
-Or download the macOS installer directly from [nodejs.org](https://nodejs.org) (LTS version).
+### 2. Install app dependencies
 
-### 2. Install dependencies
+From the repo root:
 
 ```bash
 npm install
 ```
 
-### 3. Add Essentia model files (recommended)
+### 3. Copy/download the optional model runtime files
 
-Without these the app uses a spectral heuristic fallback — still works, but genre accuracy is much lower. The Home screen shows an amber notice if the files are absent.
-
-```bash
-npm install essentia.js
-```
+Run the helper script from the repo root:
 
 ```bash
-cp node_modules/essentia.js/dist/essentia-wasm.es.js public/models/
+npm run setup:models
 ```
+
+That command does three things:
+
+1. installs `essentia.js` locally without adding it to `package.json`
+2. copies the Essentia runtime files into `public/models/`
+3. tries to download `discogs_519labels.txt` into `public/models/`
+
+Then verify what is present:
 
 ```bash
-WASM_SRC=$(find node_modules/essentia.js/dist -maxdepth 1 -type f -name 'essentia-wasm*.wasm' | head -n 1)
+npm run check:models
 ```
 
-```bash
-cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
+### 4. Understand what `setup:models` can and cannot fetch
+
+After `npm run setup:models`, you should normally have:
+
+```text
+public/models/essentia-wasm.es.js
+public/models/essentia-wasm.module.wasm
+public/models/discogs_519labels.txt
 ```
 
-**Optional: MAEST model for highest accuracy (~200 MB + shards)**
-
-This model gives the app full 519-class music style classification instead of the basic heuristic, but the current browser pipeline expects a **TensorFlow.js graph model export** rather than the standalone `.onnx` file.
-
-```bash
-mkdir -p public/models public/models/maest-30s-pw
-curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/discogs_519labels.txt" -o public/models/discogs_519labels.txt
-```
-
-Then copy `model.json` plus every `group*.bin` file referenced inside it into `public/models/maest-30s-pw/` so this path exists:
+You will **not** automatically get this file from the repo:
 
 ```text
 public/models/maest-30s-pw/model.json
@@ -138,286 +96,124 @@ If `WASM_SRC` is empty, run `ls node_modules/essentia.js/dist` and copy the `.wa
 npm run dev
 ```
 
-If you see `npm error Missing script: "dev"`, you're usually in the wrong directory. Run `pwd` and make sure you are inside this repo folder, then run `npm run dev` again.
-
-The Electron window opens. Click **New Session** and work through the 8-step wizard.
-
-### 6. Run the wizard
-
-| Step | What to do |
-|------|-----------|
-| 1 — Fixture Groups | Name your fixture groups exactly as they appear in MA3. Tick which attributes each group has (P/T, RGB, strobe, etc.). Give the session a name here. |
-| 2 — Color Preferences | Choose colors to avoid or emphasise across all genre looks. |
-| 3 — Tonight's Context | Tick which genres you expect tonight. These get a 2× confidence boost in detection. |
-| 4 — Free Executor Spaces | Tell the app which page and starting executor number it can use. It needs 14 consecutive free executors. |
-| 5 — Generate MA3 Plugin | Download `GMA3_Disco_Pilot_Plugin.lua`. Import it into MA3 as a Plugin and run it once. It creates 8 color look sequences + 2 master executors. |
-| 6 — Phaser Plugin | Download `GMA3_Disco_Pilot_Phasers.lua`. Run it separately after the main plugin. Creates P/T and effect phasers. Verify in MA3's Effect Engine afterward. |
-| 7 — OSC Connection | Enter your MA3 machine's IP and port. Click Connect. |
-| 8 — Fader Calibration | For each executor the app sweeps the fader while you mark the safe max and min. Saves your profile at the end. |
-
-After calibration you land on the live dashboard. Click **Save Profile** on the calibration complete screen to save — next time load the profile from the Home screen and skip the wizard entirely.
+The home screen warns you if Essentia runtime files are missing. If the optional MAEST graph is missing, the app still starts and the detector stays on the fallback path.
 
 ---
 
-## The Live Dashboard
+## Model asset details
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ GMA3 DISCO PILOT            OSC 192.168.1.10:8000  BLACKOUT │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│  GENRE          │  AUDIO          │  ACTIVE PROFILE         │
-│                 │                 │                         │
-│  EDM / House    │  128 BPM        │  Color temp ████░ 20    │
-│  92% confidence │  Energy ██████  │  Saturation █████████   │
-│  ── top 3 ────  │  Spectral ████  │  Movement ████████ 75   │
-│  EDM       92%  │                 │  Effect   ████████ 75   │
-│  Techno    06%  │  [Input: USB]   │  Strobe   ███ 50        │
-│  Pop       02%  │                 │                         │
-├─────────────────┼─────────────────┼─────────────────────────┤
-│  CONTROLS       │  FORCE GENRE    │  PHASERS                │
-│                 │                 │                         │
-│  [Tap BPM]      │  [EDM]  [Techno]│  P/T Slow    ● active ○ │
-│  [Auto BPM ✓]   │  [Hip-Hop][Pop] │  P/T Fast    ● active ● │
-│  [Genre Auto]   │  [80s] [Latin]  │  Color Chase ● active ● │
-│  [● Live]       │  [Rock][Corp]   │  Dim Pulse   ● active ● │
-│                 │                 │  Strobe Kill          ○ │
-│  ▸ Context      │  PANIC PRESETS  │                         │
-│  ▸ History (12) │  [ALL WHITE]    │                         │
-│                 │  [FULL BLACKOUT]│                         │
-│                 │  [HOLD+FREEZE]  │                         │
-│                 │  [HOUSE DEFAULT]│                         │
-└─────────────────┴─────────────────┴─────────────────────────┘
+### Minimum optional assets for better runtime support
+
+These files let the app load the Essentia runtime:
+
+| File | Required for | How to get it |
+|---|---|---|
+| `public/models/essentia-wasm.es.js` | loading Essentia.js in the browser | copied by `npm run setup:models` |
+| `public/models/essentia-wasm.module.wasm` | actual WASM runtime | copied by `npm run setup:models` |
+| `public/models/discogs_519labels.txt` | mapping MAEST outputs to labels | downloaded by `npm run setup:models` when network access to Hugging Face works |
+
+### Full high-accuracy MAEST setup
+
+For the full 519-label graph-model path, the renderer expects a **TensorFlow.js graph model export** here:
+
+```text
+public/models/maest-30s-pw/model.json
+public/models/maest-30s-pw/group*.bin
 ```
 
-### Key controls
+Important notes:
 
-| Control | What it does |
-|---------|-------------|
-| **BLACKOUT** (top right) | Immediately zeroes all app-controlled faders and releases all executors in MA3. Press again to restore. |
-| **Kill Strobe** (top right) | Cuts strobe independently without affecting the rest of the look. Toggle back to restore. |
-| **Force Genre chips** | Tap a genre to lock it. The app stops detecting and holds that look. Tap again to unlock. |
-| **Tap BPM** | Tap in time to override the detected BPM. Clears automatically after 4 seconds without taps. |
-| **HOLD + FREEZE** | Stops all automation — BPM tracking, genre detection, energy response. Everything holds at the current state. |
-| **Tonight's Context** | Open ▸ and toggle genres on/off to boost detection weight during the show. Useful when the set list changes. |
-| **History** | Shows a timestamped list of genre changes with BPM and confidence. Export as CSV for post-event review. |
+- A plain `.onnx` file does not satisfy the current browser loader.
+- `src/audio/genreDetector.js` probes for `/models/maest-30s-pw/model.json` at runtime before enabling graph inference.
+- If the graph or labels are missing, the app logs a warning and stays on the spectral heuristic fallback.
 
-### Panic presets
+If you already have a TensorFlow.js export from another workflow, copy the entire folder contents into `public/models/maest-30s-pw/`, then rerun:
 
-These fire instantly without rate limiting.
+```bash
+npm run check:models
+```
 
-| Button | What it sends |
-|--------|---------------|
-| **All White** | `ClearAll` → selects all fixture groups → Dimmer 100 + Saturation 0 |
-| **Full Blackout** | Same as the BLACKOUT toggle |
-| **Hold + Freeze** | Locks the current look and stops all automation |
-| **House Default** | Fires a specific executor you designate in session settings (configure `panicConfig.houseDefaultExec`) |
+For more focused instructions, see [`public/models/README.md`](public/models/README.md).
 
 ---
 
-## iPad Companion
+## GrandMA3 setup
 
-The iPad can mirror the full dashboard and send control commands over WebSocket.
+Enable OSC in GrandMA3 under `Menu -> System -> Network Protocols -> OSC`:
 
-1. Start the HTTP server from the dashboard (or add a `wsStart` call at startup — see `Dashboard.jsx`)
-2. Find your Mac's local IP: `System Preferences → Network`
-3. On iPad Safari: open `http://[mac-ip]:3030`
-4. The React UI loads in browser mode; buttons relay commands via WebSocket back to the Mac, which translates them to OSC
-
-The WebSocket server runs on the HTTP port + 1.
+- turn on **OSC Input** so MA3 accepts fader/key messages from the app
+- turn on **OSC Output** on port `8001` if you want feedback back into the app
+- note the MA3 machine IP address you will enter in the wizard
 
 ---
 
-## MA3 Plugin Notes
+## First-run workflow inside the app
 
-### Main plugin (`GMA3_Disco_Pilot_Plugin.lua`)
+1. Click **New Session**.
+2. Enter fixture groups exactly as they appear in MA3.
+3. Choose color preferences and tonight's genre context.
+4. Choose a free executor page/start range.
+5. Download and import the generated MA3 plugin.
+6. Download and run the phaser plugin.
+7. Connect OSC.
+8. Calibrate fader min/max values and save the profile.
 
-Creates 14 executors on the page and start executor you configure:
-
-```
-Exec +0  to +7   →  Color look sequences (one per genre)
-Exec +8  onward   →  Phaser sequences (P/T slow + optional P/T fast, pan-only, tilt-only + color + dim)
-Exec +?          →  BPM Rate Master (immediately after the last phaser)
-Exec +?          →  Effect Size Master (immediately after BPM master)
-```
-
-After running: right-click the Rate Master executor → set type to **SpeedMaster**. Right-click the Effect Size executor → set type to **SizeMaster**. The app controls these via fader level, not direct speed assignment.
-
-### Phaser plugin (`GMA3_Disco_Pilot_Phasers.lua`)
-
-Creates a deterministic, contiguous phaser block starting from `Exec +8`, using MA3's Effect Engine. The set is:
-
-- Always included (when mover groups exist): `DP_PHASER_PT_SLOW`
-- Optional toggles: `DP_PHASER_PT_FAST`, `DP_PHASER_PAN_ONLY`, `DP_PHASER_TILT_ONLY`
-- Optional movement presets: per-sequence P/T, Pan-only, Tilt-only preset references (entered in wizard)
-- Included when RGB groups exist: `DP_PHASER_COLOR`
-- Always included: `DP_PHASER_DIM`
-
-Because phaser creation via `gma.cmd()` is not fully documented in MA3 v2.x:
-
-1. After running, open each generated `DP_PHASER_*` sequence in MA3
-2. Verify Cue 1 has an effect in the programmer
-3. If not: use the Effect Engine panel to add/adjust the phaser manually (for example Pan/Tilt Sinus Width 30 Rate 0.3 for slow; Width 45 Rate 1.2 for fast)
-4. Store back to the sequence cue
-
-The generated script includes a step-chase alternative in comments for `DP_PHASER_PT_SLOW` — uncomment it if the Effect Engine approach doesn't work for your fixture types.
-
-Movement phasers are assigned as **Temp faders** so the app can randomize movement emphasis (P/T combined vs Pan-only vs Tilt-only, including weighted mixes) every 3 minutes, on genre changes, and on detected drops.
-
----
-
-## Tips & Tricks
-
-**Start with context.** At the beginning of the night, open the "Tonight's Context" panel and check which genres the DJ is playing. Even one or two correct hints doubles detection accuracy.
-
-**Pre-warm for 5 seconds.** The genre detector needs at least 5 seconds of audio before it makes its first analysis. At the very start of a set it'll show "Analyzing…" — this is normal.
-
-**Use Hold+Freeze during speech.** When the DJ talks on the mic or someone gives a speech, hit Hold+Freeze so the lighting doesn't react to spoken word frequencies. Unfreeze when music starts again.
-
-**Tap BPM for difficult tracks.** Meyda's BPM detection is reliable for 4/4 music but can wander on half-time feels or complex polyrhythms. If you see the rate master flickering, tap in the BPM manually and it stays locked until you reset.
-
-**Calibrate conservatively.** When marking fader boundaries during calibration, set the MAX a little below what you think is possible. Leaving headroom prevents the app from accidentally pushing a dimmer or strobe to a level that could cause issues during a show.
-
-**Profile per venue.** After calibrating for a venue, save the profile with a descriptive name (`Friday-ClubX`, `Corporates-2026`). Next time you're there, load it from the Home screen — OSC settings, executor mapping, and fader boundaries are all restored.
-
-**Silence detection is automatic.** If the music stops, the app detects silence and holds the current look rather than switching to "Corporate/Ambient" which would look strange. It resumes detecting as soon as the music comes back.
+The wizard generates the LUA/XML plugin files for you; those downloads are unrelated to the optional `public/models/*.json` runtime assets.
 
 ---
 
 ## Troubleshooting
 
-### OSC not reaching MA3
+### `npm run setup:models` finishes, but there is still no `model.json`
 
-- Confirm MA3 has OSC Input enabled under `Menu → System → Network Protocols → OSC`
-- Confirm the IP and port in the wizard match. Default MA3 port is **8000**
-- Check that both machines are on the same subnet (e.g. both on 192.168.1.x)
-- Disable the Mac firewall temporarily to rule it out: `System Preferences → Security & Privacy → Firewall`
-- Try pinging the MA3 machine from Terminal to confirm basic connectivity
+That is normal. The setup helper only installs/copies what can be sourced automatically from `essentia.js` plus the public label text file. The MAEST TensorFlow.js graph export is still a manual add-on.
 
-### Genre detection is wrong or stuck
+### I only have `maest-30s-pw.onnx`
 
-- Open the Audio panel on the dashboard and confirm the BPM and Energy meters are moving — if they're flat, the mic/audio input isn't reaching the app
-- Switch input device using the dropdown at the bottom of the Audio panel
-- Check the browser console (`Cmd+Option+I` in dev mode) for `[GenreDetector]` log messages
-- Add the Essentia TensorFlow.js graph-model files (`public/models/maest-30s-pw/model.json` + shards) for significantly better accuracy
-- Use "Tonight's Context" to hint which genres are actually playing
+The app will not load it directly. Right now the renderer expects a TensorFlow.js graph model manifest and its shard files, not ONNX.
 
-### Phasers not moving after running the plugin
+### `npm run check:models` says runtime files are missing
 
-- Check that the phaser sequences were created: open the Sequence view in MA3 and look for `DP_PHASER_PT_SLOW`, etc.
-- If cues exist but no effect is visible: open the sequence → Cue 1 → Effect Engine panel → manually add a Sinus effect to Pan/Tilt → store back
-- Alternatively uncomment the step-chase fallback in `GMA3_Disco_Pilot_Phasers.lua` and re-run
+Make sure you ran the command from the repo root and that `npm run setup:models` completed successfully. If your machine blocks the label download, rerun the command later or place `discogs_519labels.txt` into `public/models/` manually.
 
-### Rate/Size Masters not responding
+### The app starts, but Home says heuristic mode
 
-- After running the main plugin, right-click the `DP_RATE_MASTER` executor and set its type to **SpeedMaster**
-- Do the same for `DP_FX_MASTER` → **SizeMaster**
-- Then assign your phaser sequences to use that SpeedMaster in their sequence properties
-
-### Blackout button pressed but lights still on
-
-- The blackout sends OSC to zero the executors the app manages. It does not affect any other executors or groups in your show
-- If MA3's Grand Master or another sequence is running at full that overrides the app's output, blackout won't help — you need to use MA3's own blackout for that
-
-### iPad shows dashboard but buttons do nothing
-
-- Check the Electron terminal for `[WS] iPad connected from ...` — if it's not there the WebSocket connection failed
-- Make sure the iPad is on the same Wi-Fi network as the Mac
-- The HTTP and WebSocket servers start automatically when the dashboard loads. If they didn't start, check the Electron console for errors.
-
-### App launches but the Electron window is black
-
-If Terminal shows `EACCES: permission denied, mkdir ... node_modules/.vite/...`, your `node_modules` files are owned by another user (often from running `sudo npm install` once).
-
-Fix ownership from the project root:
+That means `public/models/essentia-wasm.es.js` was not found by the browser check. Run:
 
 ```bash
-sudo chown -R $(whoami) node_modules
-rm -rf node_modules/.vite
-npm install
-npm run dev
+npm run setup:models
+npm run check:models
 ```
 
-If you also see `Failed to resolve import "/models/essentia-wasm.es.js"`, install/copy the optional Essentia model files:
+then restart `npm run dev`.
 
-```bash
-mkdir -p public/models
-npm install essentia.js
-cp node_modules/essentia.js/dist/essentia-wasm.es.js public/models/
-# Some essentia.js versions publish a different WASM filename in dist/
-WASM_SRC=$(find node_modules/essentia.js/dist -maxdepth 1 -type f -name 'essentia-wasm*.wasm' | head -n 1)
-cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
-```
+### The app starts, Essentia loads, but genre accuracy is still low
 
-Without Essentia files, the app will still run with the spectral fallback detector, but accuracy is lower.
-
-### App crashes or freezes on startup (macOS)
-
-- Run `npm run dev` from Terminal and watch the output — the Electron log will show the error
-- If it's a permissions error on the microphone: `System Preferences → Security & Privacy → Privacy → Microphone` → enable Terminal or Electron
-- Packaged macOS builds now treat app-owned `file://` microphone requests as trusted too, so if Sound In still shows `permission denied`, fully quit and relaunch the app once after updating so macOS and Electron re-check the permission state
+That usually means the runtime files exist but `public/models/maest-30s-pw/model.json` and its `group*.bin` shards are still missing. In that case the app intentionally stays on the fallback detector.
 
 ---
 
-## Project Structure
+## Project structure
 
-```
-├── electron/
-│   ├── main.js          ← Electron main: OSC client/server, HTTP, WebSocket, file I/O
-│   └── preload.js       ← IPC bridge exposed to renderer (contextBridge)
-│
-├── src/
-│   ├── audio/
-│   │   ├── capture.js       ← getUserMedia, audio device enumeration
-│   │   ├── bpmDetector.js   ← Meyda BPM + energy + spectral features
-│   │   └── genreDetector.js ← Essentia.js MAEST model + spectral heuristic fallback
-│   │
-│   ├── profiles/
-│   │   ├── genreProfiles.js  ← 8 genre parameter definitions
-│   │   └── profileMapper.js  ← Translates genre + audio frame → OSC messages
-│   │
-│   ├── osc/
-│   │   ├── client.js         ← OSC send/receive wrappers (via Electron IPC)
-│   │   └── addressMap.js     ← Dynamic executor address registry
-│   │
-│   ├── luagen/
-│   │   ├── generatePlugin.js       ← Main LUA plugin generator
-│   │   └── generatePhaserPlugin.js ← Separate phaser LUA generator
-│   │
-│   ├── wizard/
-│   │   ├── SetupWizard.jsx       ← 8-step wizard shell
-│   │   ├── FixtureGroupGrid.jsx  ← Step 1: fixture groups + session name
-│   │   ├── ColorPreferences.jsx  ← Step 2
-│   │   ├── GenreContext.jsx      ← Step 3
-│   │   ├── ExecutorMap.jsx       ← Step 4: free executor allocation
-│   │   ├── PluginGenerator.jsx   ← Step 5: main LUA download
-│   │   ├── PhaserGenerator.jsx   ← Step 6: phaser LUA download
-│   │   ├── OSCConnect.jsx        ← Step 7
-│   │   └── Calibration.jsx       ← Step 8: fader boundary sweep
-│   │
-│   ├── dashboard/
-│   │   ├── Dashboard.jsx         ← Live operator dashboard
-│   │   └── Dashboard.module.css
-│   │
-│   ├── store/
-│   │   └── appState.js    ← Zustand store (session, live state, overrides, history)
-│   │
-│   ├── Home.jsx
-│   └── App.jsx
-│
-└── public/
-    └── models/
-        └── README.md      ← Instructions for Essentia model files
+```text
+electron/main.js                 # Electron main process, OSC bridge, local file/profile I/O
+electron/preload.js              # contextBridge API for the renderer
+src/audio/genreDetector.js       # Essentia/MAEST loading + heuristic fallback logic
+src/wizard/PluginGenerator.jsx   # main MA3 plugin download
+src/wizard/PhaserGenerator.jsx   # phaser plugin download
+public/models/README.md          # model asset instructions
+scripts/model-assets.mjs         # helper for copying/checking model assets
 ```
 
 ---
 
-## Building for Distribution
+## Build
 
 ```bash
 npm run build
 ```
 
-Produces a `.dmg` in `dist/`. The `public/models/` directory is included in the bundle, but model files are not — users must add them separately (they are too large to ship in the repo).
+`public/models/` is included in the packaged app, but large optional model assets are still your responsibility to place there before packaging or after installation.
 
 ---
 
