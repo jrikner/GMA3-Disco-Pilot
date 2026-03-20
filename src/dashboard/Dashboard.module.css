@@ -216,6 +216,61 @@
   transition: width 0.08s linear;
 }
 
+.gainSection {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #1a1a28;
+  border-radius: 10px;
+  background: #0d0d16;
+}
+
+.gainHeader,
+.gainMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #666;
+}
+
+.gainControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 8px;
+}
+
+.gainSlider {
+  flex: 1;
+  accent-color: #6366f1;
+  cursor: pointer;
+}
+
+.autoGainBtn {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #2a2a3a;
+  background: #12121a;
+  color: #777;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.autoGainBtn:hover {
+  border-color: #6366f180;
+  color: #c7d2fe;
+}
+
+.autoGainBtnActive {
+  background: #1e1e3a;
+  border-color: #6366f1;
+  color: #a5b4fc;
+}
+
 .silentBadge {
   display: inline-flex;
   align-items: center;
