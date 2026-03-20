@@ -12,13 +12,24 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import useStore from '../store/appState.js'
-import { startCapture, stopCapture, listAudioDevices } from '../audio/capture.js'
+import { startCapture, stopCapture, listAudioDevices, getInputGain, setInputGain as applyInputGain } from '../audio/capture.js'
 import { startBPMDetector, stopBPMDetector } from '../audio/bpmDetector.js'
 import { initGenreDetector, startGenreDetector, stopGenreDetector, setContextWeights, setGenreRealtimeHint } from '../audio/genreDetector.js'
 import * as profileMapper from '../profiles/profileMapper.js'
 import { getProfile, ALL_GENRES, TONIGHT_CONTEXTS } from '../profiles/genreProfiles.js'
 import * as oscClient from '../osc/client.js'
 import styles from './Dashboard.module.css'
+
+const AUTO_GAIN_TARGET_RMS = 0.11
+const AUTO_GAIN_MIN_ACTIVE_RMS = 0.012
+const AUTO_GAIN_ADJUSTMENT_ALPHA = 0.18
+const AUTO_GAIN_STEP_LIMIT = 0.18
+const MIN_INPUT_GAIN = 0.25
+const MAX_INPUT_GAIN = 8
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
 
 const PHASER_DEFS = [
   { key: 'ptSlow',     label: 'P/T Circle' },
@@ -41,6 +52,8 @@ export default function Dashboard() {
     setManualBpm, clearManualBpm, togglePhaser, setBlackout, setKillStrobe, setHoldFreeze,
     setScreen, session, updateSession,
     audioDeviceId, setAudioDeviceId,
+    inputGain, setInputGain,
+    autoInputGain, setAutoInputGain,
     appendHistory, history,
     panicConfig,
   } = useStore()
@@ -70,6 +83,7 @@ export default function Dashboard() {
 
   // Panic: house default page/exec inputs
   const [showPanicConfig, setShowPanicConfig] = useState(false)
+  const autoGainCooldownRef = useRef(0)
 
   // ── Start / Stop capture ──────────────────────────────────────────────────
 
@@ -102,16 +116,48 @@ export default function Dashboard() {
     return () => stopAudio()
   }, [])
 
+  useEffect(() => {
+    applyInputGain(inputGain, { immediate: true })
+  }, [inputGain])
+
   async function startAudio(deviceId = audioDeviceId) {
     if (isStarting) return
     setIsStarting(true)
     try {
       const { audioContext, sourceNode } = await startCapture(deviceId)
+      const initialGain = getInputGain()
+      setInputGain(initialGain)
 
       await initGenreDetector(liveContexts)
 
       startBPMDetector(audioContext, sourceNode, (frame) => {
         if (overrides.holdFreeze) return
+
+        if (autoInputGain) {
+          const now = performance.now()
+          const measuredRms = frame.rms ?? 0
+          if (!frame.isSilent && measuredRms >= AUTO_GAIN_MIN_ACTIVE_RMS && now >= autoGainCooldownRef.current) {
+            const currentGain = getInputGain()
+            const targetGain = clamp(currentGain * (AUTO_GAIN_TARGET_RMS / measuredRms), MIN_INPUT_GAIN, MAX_INPUT_GAIN)
+            const limitedTarget = clamp(
+              targetGain,
+              currentGain * (1 - AUTO_GAIN_STEP_LIMIT),
+              currentGain * (1 + AUTO_GAIN_STEP_LIMIT),
+            )
+            const nextGain = clamp(
+              currentGain + (limitedTarget - currentGain) * AUTO_GAIN_ADJUSTMENT_ALPHA,
+              MIN_INPUT_GAIN,
+              MAX_INPUT_GAIN,
+            )
+
+            if (Math.abs(nextGain - currentGain) >= 0.01) {
+              const appliedGain = applyInputGain(nextGain)
+              setInputGain(appliedGain)
+              autoGainCooldownRef.current = now + 180
+            }
+          }
+        }
+
         updateLive({
           bpm: frame.bpm,
           energy: frame.energy,
@@ -314,6 +360,8 @@ export default function Dashboard() {
   const oscReceivedAgo = lastOscReceived
     ? Math.round((Date.now() - lastOscReceived.ts) / 1000)
     : null
+  const displayedGain = Math.round(inputGain * 100) / 100
+  const gainPercent = Math.round((inputGain / MAX_INPUT_GAIN) * 100)
 
   return (
     <div className={styles.dashboard}>
@@ -487,6 +535,39 @@ export default function Dashboard() {
                 background: '#f59e0b',
               }}
             />
+          </div>
+        </div>
+
+        <div className={styles.gainSection}>
+          <div className={styles.gainHeader}>
+            <span>Input Gain</span>
+            <span>{displayedGain.toFixed(2)}×</span>
+          </div>
+          <div className={styles.gainControls}>
+            <input
+              className={styles.gainSlider}
+              type="range"
+              min={MIN_INPUT_GAIN}
+              max={MAX_INPUT_GAIN}
+              step={0.05}
+              value={inputGain}
+              onChange={(e) => {
+                const nextGain = Number(e.target.value)
+                const appliedGain = applyInputGain(nextGain, { immediate: true })
+                setInputGain(appliedGain)
+              }}
+            />
+            <button
+              className={`${styles.autoGainBtn} ${autoInputGain ? styles.autoGainBtnActive : ''}`}
+              onClick={() => setAutoInputGain(!autoInputGain)}
+              title="Automatically ride the microphone gain toward a stable detection level."
+            >
+              {autoInputGain ? 'Auto On' : 'Auto Off'}
+            </button>
+          </div>
+          <div className={styles.gainMeta}>
+            <span>Detection trim</span>
+            <span>{gainPercent}% of max</span>
           </div>
         </div>
 
