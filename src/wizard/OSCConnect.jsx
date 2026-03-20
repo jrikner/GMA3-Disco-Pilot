@@ -11,18 +11,45 @@ export default function OSCConnect() {
   const connect = async () => {
     setTesting(true)
     setTestResult(null)
+
     const result = await oscClient.connect(osc.host, osc.port)
-    if (result.success) {
-      updateOsc({ connected: true, lastError: null })
-      // Send a harmless test command
-      const cmdResult = await oscClient.sendCmd('echo DiscoPilotConnected')
-      setTestResult({ ok: true, msg: 'Connected successfully!' })
-    } else {
-      updateOsc({ connected: false, lastError: result.error })
+
+    if (!result.success) {
+      updateOsc({ connected: false, socketReady: false, lastError: result.error || 'Connection failed' })
       setTestResult({ ok: false, msg: result.error || 'Connection failed' })
+      setTesting(false)
+      return
     }
+
+    const cmdResult = await oscClient.sendCmd('echo DiscoPilotConnected')
+    const socketReady = result.socketReady && cmdResult.success
+    const verified = socketReady && result.verified
+
+    updateOsc({
+      connected: verified,
+      socketReady,
+      lastError: socketReady ? null : (cmdResult.error || result.error || 'Unable to open OSC socket'),
+    })
+
+    if (!socketReady) {
+      setTestResult({ ok: false, msg: cmdResult.error || result.error || 'Unable to send OSC command' })
+    } else if (verified) {
+      setTestResult({ ok: true, msg: 'OSC socket opened and the console host responded.' })
+    } else {
+      setTestResult({
+        ok: 'warning',
+        msg: result.warning || 'OSC socket opened, but the console could not be verified yet.',
+      })
+    }
+
     setTesting(false)
   }
+
+  const feedbackStyle = testResult?.ok === true
+    ? { background: '#052e16', border: '1px solid #166534', color: '#86efac' }
+    : testResult?.ok === 'warning'
+      ? { background: '#1c1917', border: '1px solid #a16207', color: '#fcd34d' }
+      : { background: '#2d0a0a', border: '1px solid #7f1d1d', color: '#fca5a5' }
 
   return (
     <div>
@@ -32,15 +59,14 @@ export default function OSCConnect() {
         The console and this Mac must be on the same network.
       </p>
 
-      {/* MA3 setup instructions */}
       <div className={styles.card}>
         <div className={styles.label}>How to enable OSC on GrandMA3</div>
         <ol style={{ fontSize: 13, color: '#aaa', lineHeight: 2, paddingLeft: 20, marginTop: 12 }}>
           <li>On the MA3 console, go to <strong style={{ color: '#e0e0e0' }}>Menu → Setup → Network</strong></li>
           <li>Open <strong style={{ color: '#e0e0e0' }}>OSC</strong> settings</li>
           <li>Enable OSC and set the <strong style={{ color: '#e0e0e0' }}>Input Port</strong> (default: 8000)</li>
-          <li>Note the console's IP address from the same menu</li>
-          <li>Optionally enable <strong style={{ color: '#e0e0e0' }}>OSC Output</strong> on a different port (8001) for feedback</li>
+          <li>Note the console&apos;s IP address from the same menu</li>
+          <li>Enable <strong style={{ color: '#e0e0e0' }}>OSC Output</strong> on a different port (usually 8001) if you want the dashboard to show verified feedback</li>
         </ol>
       </div>
 
@@ -73,7 +99,7 @@ export default function OSCConnect() {
             disabled={testing}
             style={{ minWidth: 140 }}
           >
-            {testing ? 'Connecting…' : 'Test Connection'}
+            {testing ? 'Testing…' : 'Test Connection'}
           </button>
 
           {testResult && (
@@ -81,24 +107,27 @@ export default function OSCConnect() {
               style={{
                 flex: 1,
                 padding: '10px 16px',
-                background: testResult.ok ? '#052e16' : '#2d0a0a',
-                border: `1px solid ${testResult.ok ? '#166534' : '#7f1d1d'}`,
                 borderRadius: 8,
                 fontSize: 13,
-                color: testResult.ok ? '#86efac' : '#fca5a5',
+                ...feedbackStyle,
               }}
             >
-              {testResult.ok ? '✓ ' : '✗ '}{testResult.msg}
+              {testResult.ok === true ? '✓ ' : testResult.ok === 'warning' ? '• ' : '✗ '}
+              {testResult.msg}
             </div>
           )}
         </div>
       </div>
 
-      {osc.connected && (
-        <div className={styles.card} style={{ borderColor: '#166534' }}>
-          <div className={styles.label} style={{ color: '#22c55e' }}>Connection Active</div>
-          <p style={{ fontSize: 13, color: '#86efac', marginTop: 8 }}>
-            Connected to {osc.host}:{osc.port}. You can proceed to fader calibration.
+      {osc.socketReady && (
+        <div className={styles.card} style={{ borderColor: osc.connected ? '#166534' : '#a16207' }}>
+          <div className={styles.label} style={{ color: osc.connected ? '#22c55e' : '#f59e0b' }}>
+            {osc.connected ? 'Connection Verified' : 'OSC Socket Ready'}
+          </div>
+          <p style={{ fontSize: 13, color: osc.connected ? '#86efac' : '#fcd34d', marginTop: 8 }}>
+            {osc.connected
+              ? `Connected to ${osc.host}:${osc.port}. Feedback from the console can now light the dashboard green.`
+              : `Commands can be sent to ${osc.host}:${osc.port}, but the console has not confirmed the connection yet.`}
           </p>
         </div>
       )}

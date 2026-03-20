@@ -1,49 +1,40 @@
 import React from 'react'
 import useStore from '../store/appState.js'
-import { buildAddressMapFromWizard, getAllExecutors } from '../osc/addressMap.js'
+import { buildAddressMapFromWizard, getExecutorPlan } from '../osc/addressMap.js'
 import styles from './Wizard.module.css'
-
-const getExecutorsNeeded = (phaserConfig = {}) => {
-  const {
-    includePtFast = true,
-    includePanOnly = true,
-    includeTiltOnly = true,
-  } = phaserConfig
-  return 8 + 1 + (includePtFast ? 1 : 0) + (includePanOnly ? 1 : 0) + (includeTiltOnly ? 1 : 0) + 2 + 2
-}
-
 
 export default function ExecutorMap() {
   const { session, updateSession } = useStore()
   const page = session.freeExecutorPage ?? 2
   const startExec = session.freeExecutorStart ?? 1
   const phaserConfig = session.phaserConfig || {}
-  const executorsNeeded = getExecutorsNeeded(phaserConfig)
+  const allocationPlan = getExecutorPlan({
+    fixtureGroups: session.fixtureGroups || [],
+    phaserConfig,
+  })
+  const executorsNeeded = allocationPlan.length
   const endExec = startExec + executorsNeeded - 1
 
-  const setPage = (v) => updateSession({ freeExecutorPage: Number(v) })
-  const setStart = (v) => {
-    const n = Math.max(1, Number(v))
-    updateSession({ freeExecutorStart: n })
-    // Pre-build the address map so the LUA generator can use it
-    const map = buildAddressMapFromWizard({ page, startExec: n, phaserConfig })
+  const updateMap = (nextPage, nextStartExec) => {
+    const map = buildAddressMapFromWizard({
+      page: nextPage,
+      startExec: nextStartExec,
+      fixtureGroups: session.fixtureGroups || [],
+      phaserConfig,
+    })
     updateSession({ addressMap: map })
   }
 
-  // Build preview of what will be allocated
-  const buildPreview = () => {
-    let exec = startExec
-    const rows = []
-    rows.push({ exec: exec++, label: 'Color Looks Sequence (cues 1–8)', type: 'color' })
-    rows.push({ exec: exec++, label: 'Phaser: Pan/Tilt Slow', type: 'phaser' })
-    if (phaserConfig.includePtFast ?? true) rows.push({ exec: exec++, label: 'Phaser: Pan/Tilt Fast', type: 'phaser' })
-    if (phaserConfig.includePanOnly ?? true) rows.push({ exec: exec++, label: 'Phaser: Pan-only', type: 'phaser' })
-    if (phaserConfig.includeTiltOnly ?? true) rows.push({ exec: exec++, label: 'Phaser: Tilt-only', type: 'phaser' })
-    rows.push({ exec: exec++, label: 'Phaser: Color Chase', type: 'phaser' })
-    rows.push({ exec: exec++, label: 'Phaser: Dimmer Pulse', type: 'phaser' })
-    rows.push({ exec: exec++, label: 'Master: BPM Rate', type: 'master' })
-    rows.push({ exec: exec++, label: 'Master: Effect Size', type: 'master' })
-    return rows
+  const setPage = (v) => {
+    const nextPage = Math.max(1, Number(v))
+    updateSession({ freeExecutorPage: nextPage })
+    updateMap(nextPage, startExec)
+  }
+
+  const setStart = (v) => {
+    const nextStartExec = Math.max(1, Number(v))
+    updateSession({ freeExecutorStart: nextStartExec })
+    updateMap(page, nextStartExec)
   }
 
   const typeColor = { color: '#6366f1', phaser: '#22c55e', master: '#f59e0b' }
@@ -53,8 +44,8 @@ export default function ExecutorMap() {
       <h2 className={styles.stepTitle}>Free Executor Spaces</h2>
       <p className={styles.stepDesc}>
         Tell the app which page and executor range is free for it to use.
-        The app needs <strong style={{ color: '#a5b4fc' }}>{executorsNeeded} consecutive executor slots</strong>.
-        It will NEVER touch any executor outside this range.
+        The app needs <strong style={{ color: '#a5b4fc' }}>{executorsNeeded} consecutive executor slots</strong>
+        {' '}for the items shown below.
       </p>
 
       <div className={styles.card}>
@@ -96,9 +87,9 @@ export default function ExecutorMap() {
       <div className={styles.card}>
         <div className={styles.label} style={{ marginBottom: 16 }}>Allocation Preview</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 }}>
-          {buildPreview().map(row => (
+          {allocationPlan.map((row, index) => (
             <div
-              key={row.exec}
+              key={row.key}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -110,7 +101,7 @@ export default function ExecutorMap() {
               }}
             >
               <span style={{ color: '#555', fontVariantNumeric: 'tabular-nums', minWidth: 60 }}>
-                P{page} / E{row.exec}
+                P{page} / E{startExec + index}
               </span>
               <span
                 style={{

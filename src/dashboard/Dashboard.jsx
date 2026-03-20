@@ -21,8 +21,7 @@ import * as oscClient from '../osc/client.js'
 import styles from './Dashboard.module.css'
 
 const PHASER_DEFS = [
-  { key: 'ptSlow',     label: 'P/T Slow' },
-  { key: 'ptFast',     label: 'P/T Fast' },
+  { key: 'ptSlow',     label: 'P/T Circle' },
   { key: 'panOnly',    label: 'Pan-only' },
   { key: 'tiltOnly',   label: 'Tilt-only' },
   { key: 'colorChase', label: 'Color Chase' },
@@ -204,12 +203,20 @@ export default function Dashboard() {
   // ── OSC receive ───────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!osc.connected) return
+    if (!osc.socketReady) return undefined
+
+    let unsubscribe = () => {}
     const receivePort = osc.port + 1
+
     oscClient.startReceive(receivePort, (msg) => {
       setLastOscReceived({ address: msg.address, ts: Date.now() })
+      updateOsc({ connected: true, lastError: null })
+    }).then((result) => {
+      unsubscribe = result.unsubscribe || (() => {})
     })
-  }, [osc.connected])
+
+    return () => unsubscribe()
+  }, [osc.socketReady, osc.port, updateOsc])
 
   // ── Tap tempo ─────────────────────────────────────────────────────────────
 
@@ -300,17 +307,19 @@ export default function Dashboard() {
         <div style={{ flex: 1 }} />
 
         <div className={styles.oscStatus}>
-          <div className={`${styles.oscDot} ${osc.connected ? styles.connected : ''}`} />
+          <div className={`${styles.oscDot} ${osc.connected ? styles.connected : osc.socketReady ? styles.ready : ''}`} />
           {osc.connected
             ? <>
-                {`OSC ${osc.host}:${osc.port}`}
+                {`OSC verified ${osc.host}:${osc.port}`}
                 {lastOscReceived && (
                   <span style={{ fontSize: 10, color: '#3a3a4a', marginLeft: 8 }}>
                     ← {lastOscReceived.address}
                   </span>
                 )}
               </>
-            : 'OSC disconnected'
+            : osc.socketReady
+              ? `OSC socket ready ${osc.host}:${osc.port}`
+              : 'OSC disconnected'
           }
         </div>
 
@@ -703,7 +712,7 @@ export default function Dashboard() {
         <div className={styles.panelTitle}>Phasers</div>
         {PHASER_DEFS.map(p => {
           const isDisabled = !!overrides.disabledPhasers[p.key]
-          const moverProfileActive = (p.key === 'panOnly' || p.key === 'tiltOnly') && (profile.phasers.ptSlow || profile.phasers.ptFast)
+          const moverProfileActive = (p.key === 'panOnly' || p.key === 'tiltOnly') && profile.phasers.ptSlow
           const isActive = !isDisabled && (profile.phasers[p.key] || moverProfileActive)
           return (
             <div key={p.key} className={styles.phaserRow}>

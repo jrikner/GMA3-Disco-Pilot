@@ -31,7 +31,6 @@ const useStore = create((set, get) => ({
     addressMap: null,       // built after wizard
     boundaries: {},         // key: `${page}_${exec}` → { min, max }
     phaserConfig: {
-      includePtFast: true,
       includePanOnly: true,
       includeTiltOnly: true,
       ptPreset: '',
@@ -48,6 +47,7 @@ const useStore = create((set, get) => ({
   // ── OSC connection ──────────────────────────────────────────────────────────
   osc: {
     connected: false,
+    socketReady: false,
     host: '192.168.1.100',
     port: 8000,
     lastMessage: null,
@@ -73,7 +73,7 @@ const useStore = create((set, get) => ({
   // ── Operator overrides ──────────────────────────────────────────────────────
   overrides: {
     lockedGenre: null,          // null = auto
-    disabledPhasers: {},        // { ptSlow: false, ptFast: false, ... }
+    disabledPhasers: {},        // { ptSlow: false, panOnly: false, ... }
     manualBpm: null,            // null = auto
     blackout: false,
     killStrobe: false,

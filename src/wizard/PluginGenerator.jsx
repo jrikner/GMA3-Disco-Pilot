@@ -2,18 +2,14 @@ import React, { useState } from 'react'
 import useStore from '../store/appState.js'
 import { generatePlugin } from '../luagen/generatePlugin.js'
 import { generatePluginXml } from '../luagen/generatePluginXml.js'
+import { getExecutorPlan } from '../osc/addressMap.js'
 import styles from './Wizard.module.css'
-
-const getExecutorsNeeded = (phaserConfig = {}) => {
-  const { includePtFast = true, includePanOnly = true, includeTiltOnly = true } = phaserConfig
-  return 8 + 1 + (includePtFast ? 1 : 0) + (includePanOnly ? 1 : 0) + (includeTiltOnly ? 1 : 0) + 2 + 2
-}
 
 export default function PluginGenerator() {
   const { session } = useStore()
   const [generated, setGenerated] = useState(false)
   const [luaCode, setLuaCode] = useState('')
-  const executorsNeeded = getExecutorsNeeded(session.phaserConfig || {})
+  const executorsNeeded = getExecutorPlan({ fixtureGroups: session.fixtureGroups || [], phaserConfig: session.phaserConfig || {} }).length
   const [pluginName, setPluginName] = useState('Disco Pilot Generator')
   const [pluginVersion, setPluginVersion] = useState('1.0.0')
   const [pluginDescription, setPluginDescription] = useState(
@@ -108,9 +104,8 @@ export default function PluginGenerator() {
         <div className={styles.label}>What will be created</div>
         <ul style={{ fontSize: 13, color: '#aaa', lineHeight: 2, paddingLeft: 20, marginTop: 12 }}>
           <li>8 color look sequences (one per genre: Techno, EDM, Hip-Hop, Pop, 80s, Latin, Rock, Corporate)</li>
-          <li>Mover phaser sequences: P/T Slow + optional P/T Fast, Pan-only, Tilt-only</li>
-          <li>1 color chase phaser</li>
-          <li>1 dimmer pulse phaser</li>
+          <li>Mover phaser sequences: 1 shared P/T circle plus optional Pan-only and Tilt-only</li>
+          <li>Color chase and dimmer pulse phasers only when your selected fixture groups support them</li>
           <li>1 BPM Rate Master executor</li>
           <li>1 Effect Size Master executor</li>
         </ul>

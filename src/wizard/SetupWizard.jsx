@@ -7,7 +7,6 @@ import ExecutorMap from './ExecutorMap.jsx'
 import PluginGenerator from './PluginGenerator.jsx'
 import PhaserGenerator from './PhaserGenerator.jsx'
 import OSCConnect from './OSCConnect.jsx'
-import Calibration from './Calibration.jsx'
 import styles from './Wizard.module.css'
 
 const STEPS = [
@@ -18,7 +17,6 @@ const STEPS = [
   { label: 'Generate MA3 Plugin', component: PluginGenerator },
   { label: 'Phaser Plugin',       component: PhaserGenerator },
   { label: 'OSC Connection',      component: OSCConnect },
-  { label: 'Fader Calibration',   component: Calibration },
 ]
 
 export default function SetupWizard() {
