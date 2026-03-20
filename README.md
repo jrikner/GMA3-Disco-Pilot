@@ -104,26 +104,22 @@ WASM_SRC=$(find node_modules/essentia.js/dist -maxdepth 1 -type f -name 'essenti
 cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
 ```
 
-**Optional: MAEST model for highest accuracy (~200 MB)**
+**Optional: MAEST model for highest accuracy (~200 MB + shards)**
 
-This model gives the app full 519-class music style classification instead of the basic heuristic. Download the file directly:
-
-```bash
-mkdir -p public/models
-```
+This model gives the app full 519-class music style classification instead of the basic heuristic, but the current browser pipeline expects a **TensorFlow.js graph model export** rather than the standalone `.onnx` file.
 
 ```bash
-curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/maest-30s-pw.onnx" -o public/models/maest-30s-pw.onnx
-```
-
-```bash
+mkdir -p public/models public/models/maest-30s-pw
 curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/discogs_519labels.txt" -o public/models/discogs_519labels.txt
 ```
 
-Or if you prefer to download it manually:
-1. Go to [https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l](https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l)
-2. Click the **↓** icon next to `maest-30s-pw.onnx` and `discogs_519labels.txt` in the file list
-3. Move the downloaded files to `public/models/`
+Then copy `model.json` plus every `group*.bin` file referenced inside it into `public/models/maest-30s-pw/` so this path exists:
+
+```text
+public/models/maest-30s-pw/model.json
+```
+
+If you only have `maest-30s-pw.onnx`, the app will now log a warning and stay on the spectral fallback detector instead of repeatedly throwing Essentia inference errors.
 
 See [`public/models/README.md`](public/models/README.md) for more details.
 
@@ -302,7 +298,7 @@ Movement phasers are assigned as **Temp faders** so the app can randomize moveme
 - Open the Audio panel on the dashboard and confirm the BPM and Energy meters are moving — if they're flat, the mic/audio input isn't reaching the app
 - Switch input device using the dropdown at the bottom of the Audio panel
 - Check the browser console (`Cmd+Option+I` in dev mode) for `[GenreDetector]` log messages
-- Add the Essentia model files for significantly better accuracy
+- Add the Essentia TensorFlow.js graph-model files (`public/models/maest-30s-pw/model.json` + shards) for significantly better accuracy
 - Use "Tonight's Context" to hint which genres are actually playing
 
 ### Phasers not moving after running the plugin

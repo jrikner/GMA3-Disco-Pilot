@@ -19,7 +19,7 @@
  * NOTE: Essentia.js WASM and model files must be placed in /public/models/
  * Required files:
  *   - /public/models/essentia-wasm.module.wasm
- *   - /public/models/maest-30s-pw.onnx (or TF.js model files)
+ *   - /public/models/maest-30s-pw/model.json (+ TensorFlow.js shard files)
  *
  * Until the model is loaded, genre detection falls back to spectral heuristics.
  */
@@ -33,8 +33,9 @@ const INPUT_SAMPLE_RATE = 44100
 const MODEL_SAMPLE_RATE = 16000
 const MAEST_LABELS_URL = '/models/discogs_519labels.txt'
 const MAEST_GRAPH_FILENAMES = [
-  '/models/maest-30s-pw',
+  '/models/maest-30s-pw/model.json',
   '/models/maest-30s-pw/model',
+  '/models/maest-30s-pw',
   'maest-30s-pw',
 ]
 const GENRE_BUFFER_WORKLET_URL = '/worklets/genre-buffer-processor.js'
@@ -769,6 +770,8 @@ let processorNode = null
 let processorMessagePort = null
 const loadedWorkletContexts = new WeakSet()
 let essentiaLoadPromise = null
+let availableMaestGraphFilename = null
+let essentiaInferenceDisabledReason = null
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -1038,14 +1041,20 @@ async function loadEssentia() {
 
       essentiaModule = createEssentiaRuntime(wasmModule)
       maestLabels = await loadMaestLabels()
-      modelLoaded = Boolean(essentiaModule && maestLabels?.length)
+      availableMaestGraphFilename = await resolveAvailableMaestGraphFilename()
+      modelLoaded = Boolean(essentiaModule && maestLabels?.length && availableMaestGraphFilename)
 
-      if (!modelLoaded) {
+      if (!maestLabels?.length) {
         console.warn('[GenreDetector] Essentia loaded but MAEST labels are missing or incompatible with prediction output format; enabling spectral heuristic fallback.')
         return
       }
 
-      console.log('[GenreDetector] Essentia.js loaded successfully', `(labels: ${maestLabels.length})`)
+      if (!availableMaestGraphFilename) {
+        console.warn('[GenreDetector] Essentia loaded, but no compatible MAEST TensorFlow graph model was found in /public/models/. Falling back to spectral heuristic. Expected a TensorFlow.js graph model such as /models/maest-30s-pw/model.json.')
+        return
+      }
+
+      console.log('[GenreDetector] Essentia.js loaded successfully', `(labels: ${maestLabels.length}, graph: ${availableMaestGraphFilename})`)
     } catch (err) {
       console.warn('[GenreDetector] Could not load Essentia.js:', err.message)
     }
@@ -1137,17 +1146,23 @@ async function loadMaestLabels() {
 }
 
 async function runEssentiaModel(samples) {
+  if (essentiaInferenceDisabledReason) {
+    return spectralHeuristic(samples)
+  }
+
+  let vectorInput = null
+  let features = null
+
   try {
     const essentia = essentiaModule
     const resampled = resampleWithFilter(samples, INPUT_SAMPLE_RATE, MODEL_SAMPLE_RATE)
     const normalized = normalizeMonoSamples(resampled)
-    const vectorInput = essentia.arrayToVector(new Float32Array(normalized))
+    vectorInput = essentia.arrayToVector(new Float32Array(normalized))
 
     // Feature extraction
-    const features = essentia.TensorflowInputMusiCNN(vectorInput)
+    features = essentia.TensorflowInputMusiCNN(vectorInput)
 
-    // Model inference (requires loaded TF.js model)
-    // This is a simplified call — actual Essentia.js API varies by version
+    // Model inference (requires loaded TF.js graph model)
     const predictions = await predictMaest(essentia, features)
     if (!predictions.length) {
       console.warn('[GenreDetector] MAEST prediction parsing produced no label/score pairs; falling back to spectral heuristic.')
@@ -1156,25 +1171,82 @@ async function runEssentiaModel(samples) {
 
     return mapEssentiaToGenres(predictions)
   } catch (err) {
-    console.warn('[GenreDetector] Model inference failed:', err.message)
+    const errorMessage = formatErrorMessage(err)
+    essentiaInferenceDisabledReason = errorMessage
+    modelLoaded = false
+    console.warn(`[GenreDetector] Model inference failed (${errorMessage}). Disabling Essentia inference for the rest of this session and falling back to the spectral heuristic.`)
     return spectralHeuristic(samples)
+  } finally {
+    safeDeleteEssentiaObject(features)
+    safeDeleteEssentiaObject(vectorInput)
   }
 }
 
 async function predictMaest(essentia, features) {
-  let lastError = null
+  if (!availableMaestGraphFilename) {
+    throw new Error('No compatible MAEST graph model is available')
+  }
 
-  for (const graphFilename of MAEST_GRAPH_FILENAMES) {
+  try {
+    const predictions = await essentia.TensorflowPredict2D(features, { graphFilename: availableMaestGraphFilename })
+    const parsed = parsePredictionOutput(predictions)
+    if (parsed.length > 0) return parsed
+    throw new Error('MAEST prediction output was empty or could not be parsed')
+  } catch (err) {
+    throw new Error(`Graph ${availableMaestGraphFilename} failed: ${formatErrorMessage(err)}`)
+  }
+}
+
+
+async function resolveAvailableMaestGraphFilename() {
+  for (const candidate of MAEST_GRAPH_FILENAMES) {
+    if (!looksLikeHttpPath(candidate)) continue
+
     try {
-      const predictions = await essentia.TensorflowPredict2D(features, { graphFilename })
-      const parsed = parsePredictionOutput(predictions)
-      if (parsed.length > 0) return parsed
-    } catch (err) {
-      lastError = err
+      const response = await fetch(candidate, { method: 'HEAD' })
+      if (response.ok) return candidate
+
+      if (response.status === 405) {
+        const getResponse = await fetch(candidate, { method: 'GET' })
+        if (getResponse.ok) return candidate
+      }
+    } catch {
+      // Ignore and try the next candidate.
     }
   }
 
-  throw new Error(lastError?.message || 'No valid MAEST model prediction output')
+  return null
+}
+
+function looksLikeHttpPath(candidate) {
+  return typeof candidate === 'string' && (candidate.startsWith('/') || candidate.startsWith('http://') || candidate.startsWith('https://'))
+}
+
+function formatErrorMessage(err) {
+  if (err instanceof Error && err.message) return err.message
+  if (typeof err === 'string' && err) return err
+  if (err && typeof err === 'object' && 'message' in err && typeof err.message === 'string' && err.message) return err.message
+
+  try {
+    const serialized = JSON.stringify(err)
+    if (serialized && serialized !== '{}') return serialized
+  } catch {
+    // Ignore JSON serialization failures.
+  }
+
+  if (err === undefined) return 'unknown error (received undefined)'
+  if (err === null) return 'unknown error (received null)'
+  return String(err)
+}
+
+function safeDeleteEssentiaObject(value) {
+  if (!value || typeof value.delete !== 'function') return
+
+  try {
+    value.delete()
+  } catch {
+    // Ignore delete failures from third-party WASM objects.
+  }
 }
 
 function parsePredictionOutput(predictions) {
