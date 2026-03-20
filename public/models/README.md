@@ -1,63 +1,62 @@
-# Essentia.js Model Files
+# `public/models/` runtime assets
 
-Place the required files in this directory for on-device music genre detection.
-Without these files the app falls back to a basic spectral heuristic — still functional but less accurate.
+This directory is intentionally almost empty in Git. The app looks here at runtime for optional Essentia/MAEST files.
 
-## Required Files
+## What the app checks for
 
-| File | Size | Purpose |
-|------|------|---------|
-| `essentia-wasm.es.js` | ~2 MB | Essentia.js WebAssembly ES module loader |
-| `essentia-wasm.module.wasm` | ~5 MB | Compiled Essentia WASM binary (rename/copy to this filename) |
+### Essentia runtime
 
-## Download
+These files are the minimum runtime bundle for loading Essentia in the browser:
 
-1. Go to the [Essentia.js releases](https://mtg.github.io/essentia.js/) page
-2. Download the **WASM ES module** build (not the legacy UMD build)
-3. Place both files in this directory (`public/models/`)
+- `essentia-wasm.es.js`
+- `essentia-wasm.module.wasm`
 
-Alternatively, install via npm and copy:
-```bash
-npm install essentia.js
-cp node_modules/essentia.js/dist/essentia-wasm.es.js public/models/
-# Different versions may use a different .wasm filename
-WASM_SRC=$(find node_modules/essentia.js/dist -maxdepth 1 -type f -name 'essentia-wasm*.wasm' | head -n 1)
-cp "$WASM_SRC" public/models/essentia-wasm.module.wasm
-```
-If `WASM_SRC` is empty, run `ls node_modules/essentia.js/dist` and copy whichever `essentia-wasm*.wasm` file exists to `public/models/essentia-wasm.module.wasm`.
+### Higher-accuracy MAEST assets
 
-## MAEST Model (Optional — for higher accuracy)
+For the full graph-model path, the app also looks for:
 
-The app can use the Discogs MAEST-30s model for 519-class music style classification:
+- `discogs_519labels.txt`
+- `maest-30s-pw/model.json`
+- every `maest-30s-pw/group*.bin` shard referenced by `model.json`
 
-| File | Size | Notes |
-|------|------|-------|
-| `maest-30s-pw/model.json` | varies | TensorFlow.js graph model manifest used by the browser runtime |
-| `maest-30s-pw/group*.bin` | varies | TensorFlow.js weight shard files referenced by `model.json` |
-| `discogs_519labels.txt` | ~6 KB | Label list used to map MAEST output logits back to style names |
+## Fastest setup
 
-Download with curl:
+From the repo root, run:
 
 ```bash
-mkdir -p public/models
-mkdir -p public/models/maest-30s-pw
-# Copy the TensorFlow.js export (model.json + referenced group*.bin shards) into:
-#   public/models/maest-30s-pw/
-
-curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/main/discogs_519labels.txt" \
-     -o public/models/discogs_519labels.txt
+npm run setup:models
 ```
 
-Or manually: copy a **TensorFlow.js graph model export** so that `public/models/maest-30s-pw/model.json` exists alongside the weight shard files it references. The current browser pipeline does **not** load the standalone `.onnx` file directly.
+Then inspect the result:
 
-If only the `.onnx` file is present, the app now logs a warning and stays on the spectral fallback path instead of repeatedly throwing inference errors.
+```bash
+npm run check:models
+```
 
-Without this model, the app falls back to the spectral heuristic path.
+## What `setup:models` actually downloads
 
-If `discogs_519labels.txt` is missing, the detector can still run but MAEST predictions
-cannot be reliably mapped to the internal 8 genres.
+The helper script can automatically:
 
-## Verification
+- install `essentia.js` locally with `npm install --no-save essentia.js`
+- copy `node_modules/essentia.js/dist/essentia-wasm.es.js` into this folder
+- copy the published `essentia-wasm*.wasm` file into this folder as `essentia-wasm.module.wasm`
+- try to download `discogs_519labels.txt` from Hugging Face
 
-Once files are in place, restart the app. The dashboard status bar will show
-"Essentia loaded" instead of "Heuristic fallback".
+It does **not** create `maest-30s-pw/model.json`, because this repo does not include a TensorFlow.js MAEST export.
+
+## Why there is no `.json` here by default
+
+The browser loader in `src/audio/genreDetector.js` expects a TensorFlow.js graph model export, not a standalone ONNX file. So even if you have `maest-30s-pw.onnx`, the app will not use it directly.
+
+If you want full graph inference, manually place a compatible TensorFlow.js export here:
+
+```text
+public/models/maest-30s-pw/model.json
+public/models/maest-30s-pw/group*.bin
+```
+
+## Expected outcomes
+
+- **Runtime files missing:** Home shows heuristic mode because Essentia cannot load.
+- **Runtime files present, MAEST graph missing:** app still runs, but on the spectral fallback detector.
+- **Runtime files + labels + MAEST graph present:** full high-accuracy path can load after restart.
