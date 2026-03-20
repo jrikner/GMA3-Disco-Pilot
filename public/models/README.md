@@ -50,7 +50,7 @@ curl -L "https://huggingface.co/mtg-upf/discogs-maest-30s-pw-129e-519l/resolve/m
 
 Or manually: copy a **TensorFlow.js graph model export** so that `public/models/maest-30s-pw/model.json` exists alongside the weight shard files it references. The current browser pipeline does **not** load the standalone `.onnx` file directly.
 
-If only the `.onnx` file is present, the app now logs a warning and stays on the spectral fallback path instead of repeatedly throwing inference errors.
+If only the `.onnx` file is present, the app now logs a warning and stays on the spectral fallback path instead of repeatedly throwing inference errors. The loader also verifies that `model.json` is a real TensorFlow.js graph manifest and that every referenced `group*.bin` shard is reachable before enabling Essentia inference.
 
 Without this model, the app falls back to the spectral heuristic path.
 

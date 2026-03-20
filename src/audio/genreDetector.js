@@ -38,6 +38,7 @@ const MAEST_GRAPH_FILENAMES = [
   '/models/maest-30s-pw',
   'maest-30s-pw',
 ]
+const HTML_RESPONSE_PATTERN = /<\s*!doctype html|<\s*html[\s>]/i
 const GENRE_BUFFER_WORKLET_URL = '/worklets/genre-buffer-processor.js'
 
 // ── Genre label mapping ──────────────────────────────────────────────────────
@@ -1200,22 +1201,111 @@ async function predictMaest(essentia, features) {
 
 async function resolveAvailableMaestGraphFilename() {
   for (const candidate of MAEST_GRAPH_FILENAMES) {
-    if (!looksLikeHttpPath(candidate)) continue
+    const normalizedCandidate = normalizeGraphCandidate(candidate)
+    if (!looksLikeHttpPath(normalizedCandidate)) continue
 
     try {
-      const response = await fetch(candidate, { method: 'HEAD' })
-      if (response.ok) return candidate
+      const manifest = await fetchValidGraphManifest(normalizedCandidate)
+      if (!manifest) continue
 
-      if (response.status === 405) {
-        const getResponse = await fetch(candidate, { method: 'GET' })
-        if (getResponse.ok) return candidate
+      const missingWeightShard = await findMissingWeightShard(normalizedCandidate, manifest)
+      if (missingWeightShard) {
+        console.warn(`[GenreDetector] Ignoring MAEST graph ${normalizedCandidate} because a referenced weight shard could not be loaded: ${missingWeightShard}`)
+        continue
       }
-    } catch {
-      // Ignore and try the next candidate.
+
+      return normalizedCandidate
+    } catch (err) {
+      console.warn(`[GenreDetector] Ignoring MAEST graph ${normalizedCandidate} because it is not a valid TensorFlow.js graph model: ${formatErrorMessage(err)}`)
     }
   }
 
   return null
+}
+
+function normalizeGraphCandidate(candidate) {
+  if (!looksLikeHttpPath(candidate)) return null
+  if (candidate.endsWith('/model.json') || candidate.endsWith('.json')) return candidate
+  if (candidate.endsWith('/')) return `${candidate}model.json`
+  return `${candidate}/model.json`
+}
+
+async function fetchValidGraphManifest(candidate) {
+  const response = await fetch(candidate, { method: 'GET', cache: 'no-store' })
+  if (!response.ok) return null
+
+  const contentType = response.headers.get('content-type') || ''
+  const rawText = await response.text()
+  const trimmedText = rawText.trim()
+  if (!trimmedText) return null
+
+  if (contentType.includes('text/html') || HTML_RESPONSE_PATTERN.test(trimmedText.slice(0, 128))) {
+    return null
+  }
+
+  let manifest = null
+  try {
+    manifest = JSON.parse(trimmedText)
+  } catch {
+    throw new Error('response was not valid JSON')
+  }
+
+  if (!manifest || typeof manifest !== 'object') {
+    throw new Error('manifest JSON was empty or malformed')
+  }
+
+  const hasModelTopology = 'modelTopology' in manifest
+  const weightEntries = Array.isArray(manifest.weightsManifest) ? manifest.weightsManifest : []
+  const hasWeightPaths = weightEntries.some((entry) => Array.isArray(entry?.paths) && entry.paths.length > 0)
+  if (!hasModelTopology || !hasWeightPaths) {
+    throw new Error('manifest is missing modelTopology or weightsManifest paths')
+  }
+
+  return manifest
+}
+
+async function findMissingWeightShard(graphFilename, manifest) {
+  const shardPaths = Array.from(new Set(
+    manifest.weightsManifest
+      .flatMap((entry) => Array.isArray(entry?.paths) ? entry.paths : [])
+      .filter((value) => typeof value === 'string' && value.trim())
+  ))
+
+  for (const shardPath of shardPaths) {
+    const resolvedUrl = new URL(shardPath, new URL(graphFilename, window.location.origin)).href
+    const isAvailable = await checkStaticAssetAvailability(resolvedUrl)
+    if (!isAvailable) return shardPath
+  }
+
+  return null
+}
+
+async function checkStaticAssetAvailability(url) {
+  try {
+    const headResponse = await fetch(url, { method: 'HEAD', cache: 'no-store' })
+    if (headResponse.ok) {
+      const contentType = headResponse.headers.get('content-type') || ''
+      return !contentType.includes('text/html')
+    }
+
+    if (headResponse.status !== 405) return false
+  } catch {
+    // Fall through to GET for environments that do not support HEAD or block it.
+  }
+
+  try {
+    const getResponse = await fetch(url, { method: 'GET', cache: 'no-store' })
+    if (!getResponse.ok) return false
+
+    const contentType = getResponse.headers.get('content-type') || ''
+    if (contentType.includes('text/html')) return false
+    if (contentType && !contentType.startsWith('text/')) return true
+
+    const textSample = await getResponse.text().catch(() => '')
+    return !HTML_RESPONSE_PATTERN.test(textSample.slice(0, 128))
+  } catch {
+    return false
+  }
 }
 
 function looksLikeHttpPath(candidate) {

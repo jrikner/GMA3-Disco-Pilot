@@ -119,7 +119,7 @@ Then copy `model.json` plus every `group*.bin` file referenced inside it into `p
 public/models/maest-30s-pw/model.json
 ```
 
-If you only have `maest-30s-pw.onnx`, the app will now log a warning and stay on the spectral fallback detector instead of repeatedly throwing Essentia inference errors.
+If you only have `maest-30s-pw.onnx`, the app will now log a warning and stay on the spectral fallback detector instead of repeatedly throwing Essentia inference errors. The loader also verifies that `model.json` is a real TensorFlow.js graph manifest and that every referenced `group*.bin` shard is reachable before enabling Essentia inference.
 
 See [`public/models/README.md`](public/models/README.md) for more details.
 
