@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test:bpm": "node scripts/test-bpm-detection.mjs",
     "setup:models": "npm install --no-save essentia.js && node scripts/model-assets.mjs",
-    "check:models": "node scripts/model-assets.mjs check"
+    "check:models": "node scripts/model-assets.mjs check",
+    "convert:maest": "node scripts/convert-maest-frozen-model.mjs"
   },
   "dependencies": {
     "meyda": "^5.6.2",
