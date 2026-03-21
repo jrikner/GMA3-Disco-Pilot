@@ -7,6 +7,12 @@ const venvDir = path.join(repoRoot, '.venv-maest')
 const isWindows = process.platform === 'win32'
 const MIN_SUPPORTED_MINOR = 9
 const MAX_SUPPORTED_MINOR = 12
+const pythonMlDependencies = [
+  'tensorflow==2.17.1',
+  'tf-keras==2.17.0',
+  'tensorflowjs==4.22.0',
+  'tensorflow-decision-forests==1.10.1',
+]
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -163,7 +169,7 @@ async function main() {
   }
 
   await run(venvPython, ['-m', 'pip', 'install', '--upgrade', 'pip'])
-  await run(venvPython, ['-m', 'pip', 'install', 'tensorflow==2.17.1', 'tf-keras==2.17.0', 'tensorflowjs==4.22.0'])
+  await run(venvPython, ['-m', 'pip', 'install', ...pythonMlDependencies])
 
   console.log('\n✔ Python MAEST conversion environment is ready.')
   console.log(`Created with ${python} (${formatPythonVersion(version)}).`)
