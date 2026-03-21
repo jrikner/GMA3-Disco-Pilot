@@ -10,6 +10,7 @@ const repoRoot = process.cwd()
 const candidateRepoRoots = [...new Set([repoRoot, scriptRepoRoot])]
 const modelsDir = path.join(repoRoot, 'public', 'models')
 const outputDir = path.join(modelsDir, 'maest-30s-pw')
+const pythonConverterScript = path.join(scriptRepoRoot, 'scripts', 'convert-maest-frozen-model.py')
 
 function usage() {
   console.error('Usage: npm run convert:maest -- <path-to-model.pb> <path-to-metadata.json>')
@@ -71,7 +72,7 @@ async function inspectPython(command) {
     const probeMarker = '__GMA3_DISCO_PILOT_PYTHON_PROBE__'
     const child = spawn(
       command,
-      ['-c', `import importlib.util, json, sys; print("${probeMarker}" + json.dumps({"major": sys.version_info.major, "minor": sys.version_info.minor, "micro": sys.version_info.micro, "hasTensorflowJs": bool(importlib.util.find_spec("tensorflowjs.converters.converter"))}))`],
+      ['-c', `import importlib.util, json, sys; spec = importlib.util.find_spec("tensorflowjs"); print("${probeMarker}" + json.dumps({"major": sys.version_info.major, "minor": sys.version_info.minor, "micro": sys.version_info.micro, "hasTensorflowJs": bool(spec and spec.submodule_search_locations)}))`],
       {
         cwd: repoRoot,
         stdio: ['ignore', 'pipe', 'ignore'],
@@ -165,7 +166,7 @@ async function findPython() {
   if (inspectedCandidates.length) {
     const checked = inspectedCandidates.map(formatInterpreterStatus).join(', ')
     throw new Error(
-      `Found Python interpreter(s), but none have the tensorflowjs converter module installed. Checked: ${checked}. ` +
+      `Found Python interpreter(s), but none have the tensorflowjs package installed. Checked: ${checked}. ` +
       'Run `npm run setup:python-ml` to create or repair the repo venv, or install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0 into one of those interpreters with pip.',
     )
   }
@@ -209,14 +210,11 @@ async function main() {
 
   console.log(`Converting ${path.basename(pbPath)} -> public/models/maest-30s-pw/model.json`)
   await runCommand(python, [
-    '-m',
-    'tensorflowjs.converters.converter',
-    '--input_format=tf_frozen_model',
-    '--output_format=tfjs_graph_model',
-    '--output_node_names=PartitionedCall/Identity_13',
-    `--metadata=${tfjsMetadata}`,
+    pythonConverterScript,
     pbPath,
+    'PartitionedCall/Identity_13',
     outputDir,
+    tfjsMetadata,
   ])
 
   console.log(`Wrote labels to public/models/${metadata.labelsFile}`)
@@ -229,6 +227,7 @@ main().catch((error) => {
   console.error('\nIf TensorFlow.js conversion tools are not installed, run:')
   console.error('  npm run setup:python-ml')
   console.error('  # or inside your own venv: python3 -m pip install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0')
+  console.error('\nIf you hit a protobuf runtime mismatch from tensorflow-decision-forests/ydf, rerun this command after pulling the latest repo changes.')
   console.error('\nHomebrew installs Python itself, but not Python packages like tensorflowjs.')
   console.error('Install those with pip inside a venv, or let this repo create .venv-maest with npm run setup:python-ml.')
   process.exit(1)
