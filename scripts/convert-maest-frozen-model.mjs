@@ -150,6 +150,14 @@ async function findPython() {
 
   const uniqueCandidates = [...new Set(candidates)]
   const inspectedCandidates = []
+  const repoVenvCandidates = new Set(
+    candidateRepoRoots.flatMap((rootDir) => process.platform === 'win32'
+      ? [path.join(rootDir, '.venv-maest', 'Scripts', 'python.exe')]
+      : [
+          path.join(rootDir, '.venv-maest', 'bin', 'python'),
+          path.join(rootDir, '.venv-maest', 'bin', 'python3'),
+        ]),
+  )
 
   for (const candidate of uniqueCandidates) {
 
