@@ -34,6 +34,8 @@ If you are on macOS, create the Python conversion environment first:
 npm run setup:python-ml
 ```
 
+`brew install python` is helpful for getting Python 3 onto your machine, but it does not install the `tensorflowjs` converter package by itself. The command above creates `.venv-maest` and installs the required pip packages for you.
+
 Then convert the official frozen graph:
 
 ```bash
