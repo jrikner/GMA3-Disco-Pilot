@@ -64,15 +64,49 @@ function runCommand(command, args, options = {}) {
   })
 }
 
-async function ensureTensorflowJsConverter(python) {
-  try {
-    await runCommand(python, ['-c', 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("tensorflowjs.converters.converter") else 1)'], { stdio: 'ignore' })
-  } catch {
-    throw new Error(
-      `Python interpreter "${python}" is available, but the tensorflowjs converter module is not installed. ` +
-      'Run `npm run setup:python-ml` to create the repo venv, or install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0 into that interpreter with pip.',
+async function inspectPython(command) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      command,
+      ['-c', 'import importlib.util, json, sys; print(json.dumps({"major": sys.version_info.major, "minor": sys.version_info.minor, "micro": sys.version_info.micro, "hasTensorflowJs": bool(importlib.util.find_spec("tensorflowjs.converters.converter"))}))'],
+      {
+        cwd: repoRoot,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
     )
-  }
+
+    let stdout = ''
+
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk)
+    })
+
+    child.on('error', () => {
+      resolve(null)
+    })
+
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        resolve(null)
+        return
+      }
+
+      try {
+        const parsed = JSON.parse(stdout.trim())
+        resolve({
+          command,
+          version: `${parsed.major}.${parsed.minor}.${parsed.micro}`,
+          hasTensorflowJs: Boolean(parsed.hasTensorflowJs),
+        })
+      } catch {
+        resolve(null)
+      }
+    })
+  })
+}
+
+function formatInterpreterStatus(candidate) {
+  return `${candidate.command} (${candidate.version}${candidate.hasTensorflowJs ? ', tensorflowjs installed' : ', tensorflowjs missing'})`
 }
 
 async function findPython() {
@@ -80,16 +114,43 @@ async function findPython() {
     ? path.join(repoRoot, '.venv-maest', 'Scripts', 'python.exe')
     : path.join(repoRoot, '.venv-maest', 'bin', 'python')
 
-  const candidates = [process.env.PYTHON, venvPython, 'python3', 'python'].filter(Boolean)
+  const candidates = [
+    process.env.PYTHON,
+    venvPython,
+    'python3.12',
+    'python3.11',
+    'python3.10',
+    'python3.9',
+    'python3',
+    'python',
+  ].filter(Boolean)
 
-  for (const candidate of candidates) {
-    try {
-      if (candidate === venvPython && !(await exists(candidate))) continue
-      await runCommand(candidate, ['--version'], { stdio: 'ignore' })
-      return candidate
-    } catch {
-      // Try the next candidate.
+  const uniqueCandidates = [...new Set(candidates)]
+  const inspectedCandidates = []
+
+  for (const candidate of uniqueCandidates) {
+    if (candidate === venvPython && !(await exists(candidate))) continue
+
+    const inspected = await inspectPython(candidate)
+    if (!inspected) continue
+
+    inspectedCandidates.push(inspected)
+
+    if (inspected.hasTensorflowJs) {
+      return inspected.command
     }
+  }
+
+  if (inspectedCandidates.length) {
+    const checked = inspectedCandidates.map(formatInterpreterStatus).join(', ')
+    const repoVenvNeedsSetup = inspectedCandidates.some((candidate) => candidate.command === venvPython && !candidate.hasTensorflowJs)
+    throw new Error(
+      `${repoVenvNeedsSetup
+        ? 'The repo-local .venv-maest exists, but it is missing the tensorflowjs converter packages. '
+        : 'Found Python interpreter(s), but none have the tensorflowjs converter module installed. '
+      }Checked: ${checked}. ` +
+      'Run `npm run setup:python-ml` to create or repair the repo venv, or install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0 into one of those interpreters with pip.',
+    )
   }
 
   throw new Error('Could not find python3 or python on PATH. On macOS, install Python 3 and rerun npm run setup:python-ml.')
@@ -109,7 +170,6 @@ async function main() {
   if (!(await exists(metadataPath))) throw new Error(`Metadata JSON not found: ${metadataPath}`)
 
   const python = await findPython()
-  await ensureTensorflowJsConverter(python)
   const metadata = await readMetadata(metadataPath)
   await fs.mkdir(modelsDir, { recursive: true })
   await fs.mkdir(outputDir, { recursive: true })
