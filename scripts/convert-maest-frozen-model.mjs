@@ -82,6 +82,7 @@ async function main() {
 
   const labelsPath = path.join(modelsDir, metadata.labelsFile)
   await fs.writeFile(labelsPath, `${metadata.classes.join('\n')}\n`)
+  await fs.copyFile(metadataPath, path.join(outputDir, 'metadata.json'))
 
   const tfjsMetadata = JSON.stringify({
     sourceGraph: path.basename(pbPath),
@@ -104,6 +105,7 @@ async function main() {
   ])
 
   console.log(`Wrote labels to public/models/${metadata.labelsFile}`)
+  console.log('Copied metadata to public/models/maest-30s-pw/metadata.json')
   console.log('Done. The converted TensorFlow.js graph is ready for the browser loader.')
 }
 

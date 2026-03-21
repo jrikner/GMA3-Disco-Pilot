@@ -1,21 +1,21 @@
 # `public/models/` runtime assets
 
-This directory is intentionally almost empty in Git. The app looks here at runtime for optional Essentia/MAEST files.
+This directory is intentionally almost empty in Git. The app looks here at runtime for the Essentia browser runtime and the optional Discogs-MAEST model assets.
 
-## What the app checks for
+## Required Essentia runtime files
 
-### Essentia runtime
-
-These files are the minimum runtime bundle for loading Essentia in the browser:
+The remodeled detector needs all three files below:
 
 - `essentia-wasm.es.js`
 - `essentia-wasm.module.wasm`
+- `essentia.js-core.es.js`
 
-### Higher-accuracy MAEST assets
+## Required MAEST assets
 
-For the full graph-model path, the app also looks for:
+For Discogs-MAEST inference, the app also looks for:
 
 - `discogs_519labels.txt`
+- `maest-30s-pw/metadata.json`
 - `maest-30s-pw/model.json`
 - every `maest-30s-pw/group*.bin` shard referenced by `model.json`
 
@@ -33,30 +33,33 @@ Then inspect the result:
 npm run check:models
 ```
 
-## What `setup:models` actually downloads
+## What `setup:models` does
 
-If only the `.onnx` file is present, the app now logs a warning and stays on the spectral fallback path instead of repeatedly throwing inference errors. The loader also verifies that `model.json` is a real TensorFlow.js graph manifest and that every referenced `group*.bin` shard is reachable before enabling Essentia inference.
+- copies the browser Essentia runtime from `node_modules/essentia.js/dist/`
+- downloads `discogs_519labels.txt`
+- downloads the official `discogs-maest-30s-pw-519l-2.json` metadata as `maest-30s-pw/metadata.json`
 
-- install `essentia.js` locally with `npm install --no-save essentia.js`
-- copy `node_modules/essentia.js/dist/essentia-wasm.es.js` into this folder
-- copy the published `essentia-wasm*.wasm` file into this folder as `essentia-wasm.module.wasm`
-- try to download `discogs_519labels.txt` from Hugging Face
+It does **not** create `maest-30s-pw/model.json`, because the repo does not ship the TensorFlow.js export of the MAEST graph.
 
-It does **not** create `maest-30s-pw/model.json`, because this repo does not include a TensorFlow.js MAEST export.
+## Generating the TensorFlow.js graph
 
-## Why there is no `.json` here by default
+If you have the official frozen graph and metadata JSON, run:
 
-The browser loader in `src/audio/genreDetector.js` expects a TensorFlow.js graph model export, not a standalone ONNX file. So even if you have `maest-30s-pw.onnx`, the app will not use it directly.
+```bash
+npm run convert:maest -- /path/to/model.pb /path/to/model.json
+```
 
-If you want full graph inference, either manually place a compatible TensorFlow.js export here or generate one from the official frozen graph + metadata JSON with `npm run convert:maest -- /path/to/model.pb /path/to/model.json`:
+That command writes:
 
 ```text
+public/models/discogs_519labels.txt
+public/models/maest-30s-pw/metadata.json
 public/models/maest-30s-pw/model.json
 public/models/maest-30s-pw/group*.bin
 ```
 
 ## Expected outcomes
 
-- **Runtime files missing:** Home shows heuristic mode because Essentia cannot load.
-- **Runtime files present, MAEST graph missing:** app still runs, but on the spectral fallback detector.
-- **Runtime files + labels + MAEST graph present:** full high-accuracy path can load after restart.
+- **Runtime files missing:** genre detection stays unavailable because Essentia preprocessing cannot load.
+- **Runtime ready, graph missing:** audio capture works, but live genre detection cannot start.
+- **Runtime + labels + metadata + graph ready:** full Discogs-MAEST path can load after restart.
