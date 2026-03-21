@@ -234,11 +234,11 @@ npm run setup:python-ml
 
 The converter now prefers `python3`, but Python 3 still needs to be installed first.
 
-### `npm run convert:maest` fails with `No module named 'tensorflowjs'`
+### `npm run convert:maest` says the tensorflowjs converter is missing
 
 `brew install python` only installs the Python interpreter. It does **not** install Python packages such as `tensorflow`, `tf-keras`, or `tensorflowjs`.
 
-Use the repo-managed virtual environment instead:
+`npm run convert:maest` now checks several Python candidates and reports which interpreters it found plus whether `tensorflowjs` is installed in each one. If the repo-local `.venv-maest` exists but is missing packages, rerun setup to repair it:
 
 ```bash
 npm run setup:python-ml
