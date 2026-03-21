@@ -123,16 +123,23 @@ function formatInterpreterStatus(candidate) {
 }
 
 async function findPython() {
-  const candidates = [
-    process.env.PYTHON,
-    ...candidateRepoRoots.flatMap((rootDir) => process.platform === 'win32'
-      ? [
-          path.join(rootDir, '.venv-maest', 'Scripts', 'python.exe'),
-        ]
+  const repoVenvCandidates = [...new Set(
+    candidateRepoRoots.flatMap((rootDir) => process.platform === 'win32'
+      ? [path.join(rootDir, '.venv-maest', 'Scripts', 'python.exe')]
       : [
           path.join(rootDir, '.venv-maest', 'bin', 'python'),
           path.join(rootDir, '.venv-maest', 'bin', 'python3'),
         ]),
+  )]
+
+  for (const candidate of repoVenvCandidates) {
+    if (await exists(candidate)) {
+      return candidate
+    }
+  }
+
+  const candidates = [
+    process.env.PYTHON,
     'python3.12',
     'python3.11',
     'python3.10',
@@ -153,7 +160,6 @@ async function findPython() {
   )
 
   for (const candidate of uniqueCandidates) {
-    if (repoVenvCandidates.has(candidate) && !(await exists(candidate))) continue
 
     const inspected = await inspectPython(candidate)
     if (!inspected) continue
@@ -167,12 +173,8 @@ async function findPython() {
 
   if (inspectedCandidates.length) {
     const checked = inspectedCandidates.map(formatInterpreterStatus).join(', ')
-    const repoVenvNeedsSetup = inspectedCandidates.some((candidate) => repoVenvCandidates.has(candidate.command) && !candidate.hasTensorflowJs)
     throw new Error(
-      `${repoVenvNeedsSetup
-        ? 'The repo-local .venv-maest exists, but it is missing the tensorflowjs converter packages. '
-        : 'Found Python interpreter(s), but none have the tensorflowjs converter module installed. '
-      }Checked: ${checked}. ` +
+      `Found Python interpreter(s), but none have the tensorflowjs converter module installed. Checked: ${checked}. ` +
       'Run `npm run setup:python-ml` to create or repair the repo venv, or install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0 into one of those interpreters with pip.',
     )
   }

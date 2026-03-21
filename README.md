@@ -92,7 +92,7 @@ That command creates `.venv-maest` and installs the conversion dependencies used
 >
 > If `.venv-maest` already exists but was created with an incompatible or different Python release, the setup script recreates it automatically before installing packages.
 >
-> It also prefers the repo-local `.venv-maest/bin/python` when that environment exists, so you do not need to manually activate it before running `npm run convert:maest`. The converter checks both the current working directory and the script's own repo path so symlinked repo locations still reuse the repo-managed virtualenv.
+> It also uses the repo-local `.venv-maest/bin/python` or `.venv-maest/bin/python3` directly when that environment exists, so you do not need to manually activate it before running `npm run convert:maest`. The converter checks both the current working directory and the script's own repo path so symlinked repo locations still reuse the repo-managed virtualenv.
 
 ---
 
@@ -238,7 +238,7 @@ The converter now prefers `python3`, but Python 3 still needs to be installed fi
 
 `brew install python` only installs the Python interpreter. It does **not** install Python packages such as `tensorflow`, `tf-keras`, or `tensorflowjs`.
 
-`npm run convert:maest` now checks several Python candidates and reports which interpreters it found plus whether `tensorflowjs` is installed in each one. It also checks both common repo-local virtualenv executables (`.venv-maest/bin/python` and `.venv-maest/bin/python3`) and resolves the repo root from both your current directory and the converter script path. If the repo-local `.venv-maest` exists but is missing packages, rerun setup to repair it:
+`npm run convert:maest` now uses the repo-local virtualenv executable directly when `.venv-maest/bin/python` or `.venv-maest/bin/python3` exists, and otherwise checks several Python candidates on your `PATH` and reports which ones have the `tensorflowjs` converter installed. It also resolves the repo root from both your current directory and the converter script path. If the repo-local `.venv-maest` exists but is missing packages, rerun setup to repair it:
 
 ```bash
 npm run setup:python-ml
