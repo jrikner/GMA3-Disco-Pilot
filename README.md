@@ -86,6 +86,8 @@ That command creates `.venv-maest` and installs the conversion dependencies used
 - `tensorflowjs==4.22.0`
 
 > On macOS this is important because `python` is often missing while `python3` exists. The converter in this repo now automatically prefers `python3` and falls back to `python`.
+>
+> It also prefers the repo-local `.venv-maest/bin/python` when that environment exists, so you do not need to manually activate it before running `npm run convert:maest`.
 
 ---
 
@@ -226,6 +228,23 @@ npm run setup:python-ml
 ```
 
 The converter now prefers `python3`, but Python 3 still needs to be installed first.
+
+### `npm run convert:maest` fails with `No module named 'tensorflowjs'`
+
+`brew install python` only installs the Python interpreter. It does **not** install Python packages such as `tensorflow`, `tf-keras`, or `tensorflowjs`.
+
+Use the repo-managed virtual environment instead:
+
+```bash
+npm run setup:python-ml
+npm run convert:maest -- /path/to/model.pb /path/to/model.json
+```
+
+If you want to use your own interpreter instead of `.venv-maest`, install the required packages with pip into that same interpreter:
+
+```bash
+python3 -m pip install tensorflow==2.17.1 tf-keras==2.17.0 tensorflowjs==4.22.0
+```
 
 ### I only have an `.onnx` file
 
