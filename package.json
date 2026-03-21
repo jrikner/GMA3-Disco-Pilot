@@ -10,7 +10,8 @@
     "test:bpm": "node scripts/test-bpm-detection.mjs",
     "setup:models": "node scripts/model-assets.mjs",
     "check:models": "node scripts/model-assets.mjs check",
-    "convert:maest": "node scripts/convert-maest-frozen-model.mjs"
+    "convert:maest": "node scripts/convert-maest-frozen-model.mjs",
+    "setup:python-ml": "node scripts/setup-python-ml.mjs"
   },
   "dependencies": {
     "meyda": "^5.6.2",

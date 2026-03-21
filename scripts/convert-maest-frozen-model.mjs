@@ -48,19 +48,35 @@ async function readMetadata(metadataPath) {
   }
 }
 
-function runPython(args) {
+function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('python', args, {
+    const child = spawn(command, args, {
       cwd: repoRoot,
       stdio: 'inherit',
+      ...options,
     })
 
     child.on('error', reject)
     child.on('exit', (code) => {
       if (code === 0) resolve()
-      else reject(new Error(`python ${args.join(' ')} exited with code ${code}`))
+      else reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`))
     })
   })
+}
+
+async function findPython() {
+  const candidates = [process.env.PYTHON, 'python3', 'python'].filter(Boolean)
+
+  for (const candidate of candidates) {
+    try {
+      await runCommand(candidate, ['--version'], { stdio: 'ignore' })
+      return candidate
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  throw new Error('Could not find python3 or python on PATH. On macOS, install Python 3 and rerun npm run setup:python-ml.')
 }
 
 async function main() {
@@ -76,6 +92,7 @@ async function main() {
   if (!(await exists(pbPath))) throw new Error(`Frozen graph not found: ${pbPath}`)
   if (!(await exists(metadataPath))) throw new Error(`Metadata JSON not found: ${metadataPath}`)
 
+  const python = await findPython()
   const metadata = await readMetadata(metadataPath)
   await fs.mkdir(modelsDir, { recursive: true })
   await fs.mkdir(outputDir, { recursive: true })
@@ -93,7 +110,7 @@ async function main() {
   })
 
   console.log(`Converting ${path.basename(pbPath)} -> public/models/maest-30s-pw/model.json`)
-  await runPython([
+  await runCommand(python, [
     '-m',
     'tensorflowjs.converters.converter',
     '--input_format=tf_frozen_model',
@@ -111,7 +128,8 @@ async function main() {
 
 main().catch((error) => {
   console.error(`✖ ${error.message}`)
-  console.error('\nIf tensorflowjs is not installed, run:')
-  console.error('  python -m pip install tensorflow==2.17.1 tf-keras==2.17.0 tensorflowjs==4.22.0')
+  console.error('\nIf TensorFlow.js conversion tools are not installed, run:')
+  console.error('  npm run setup:python-ml')
+  console.error('  # or inside your own venv: python3 -m pip install tensorflow==2.17.1 tf-keras==2.17.0 tensorflowjs==4.22.0')
   process.exit(1)
 })

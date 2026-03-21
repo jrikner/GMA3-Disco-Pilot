@@ -1,65 +1,75 @@
-# `public/models/` runtime assets
+# `public/models/` quick guide
 
-This directory is intentionally almost empty in Git. The app looks here at runtime for the Essentia browser runtime and the optional Discogs-MAEST model assets.
+This folder is **not** fully committed to Git.
 
-## Required Essentia runtime files
+You must add the Essentia runtime files and the converted MAEST TensorFlow.js graph yourself.
 
-The remodeled detector needs all three files below:
+---
 
-- `essentia-wasm.es.js`
-- `essentia-wasm.module.wasm`
-- `essentia.js-core.es.js`
+## 1. Copy the Essentia runtime
 
-## Required MAEST assets
-
-For Discogs-MAEST inference, the app also looks for:
-
-- `discogs_519labels.txt`
-- `maest-30s-pw/metadata.json`
-- `maest-30s-pw/model.json`
-- every `maest-30s-pw/group*.bin` shard referenced by `model.json`
-
-## Fastest setup
-
-From the repo root, run:
+From the repo root:
 
 ```bash
 npm run setup:models
 ```
 
-Then inspect the result:
+That gives you:
+
+```text
+public/models/essentia-wasm.es.js
+public/models/essentia-wasm.module.wasm
+public/models/essentia.js-core.es.js
+public/models/discogs_519labels.txt
+public/models/maest-30s-pw/metadata.json
+```
+
+---
+
+## 2. Convert the official MAEST model
+
+If you are on macOS, create the Python conversion environment first:
+
+```bash
+npm run setup:python-ml
+```
+
+Then convert the official frozen graph:
+
+```bash
+npm run convert:maest -- /path/to/discogs-maest-30s-pw-519l-2.pb /path/to/discogs-maest-30s-pw-519l-2.json
+```
+
+That creates:
+
+```text
+public/models/maest-30s-pw/model.json
+public/models/maest-30s-pw/group*.bin
+public/models/maest-30s-pw/metadata.json
+```
+
+---
+
+## 3. Verify everything
 
 ```bash
 npm run check:models
 ```
 
-## What `setup:models` does
+You want all four items to be ready:
 
-- copies the browser Essentia runtime from `node_modules/essentia.js/dist/`
-- downloads `discogs_519labels.txt`
-- downloads the official `discogs-maest-30s-pw-519l-2.json` metadata as `maest-30s-pw/metadata.json`
+- Essentia runtime
+- Discogs labels
+- MAEST metadata
+- MAEST TF.js graph
 
-It does **not** create `maest-30s-pw/model.json`, because the repo does not ship the TensorFlow.js export of the MAEST graph.
+---
 
-## Generating the TensorFlow.js graph
+## 4. Important note
 
-If you have the official frozen graph and metadata JSON, run:
+A standalone `.onnx` file is **not** enough for this app.
 
-```bash
-npm run convert:maest -- /path/to/model.pb /path/to/model.json
-```
+The renderer expects the **TensorFlow.js** graph export:
 
-That command writes:
-
-```text
-public/models/discogs_519labels.txt
-public/models/maest-30s-pw/metadata.json
-public/models/maest-30s-pw/model.json
-public/models/maest-30s-pw/group*.bin
-```
-
-## Expected outcomes
-
-- **Runtime files missing:** genre detection stays unavailable because Essentia preprocessing cannot load.
-- **Runtime ready, graph missing:** audio capture works, but live genre detection cannot start.
-- **Runtime + labels + metadata + graph ready:** full Discogs-MAEST path can load after restart.
+- `model.json`
+- every referenced `group*.bin` shard
