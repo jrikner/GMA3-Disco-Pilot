@@ -279,6 +279,16 @@ The setup script now pins the compatible combination used by this repo:
 
 If you created `.venv-maest` before this fix, rerun `npm run setup:python-ml` and the environment will be updated with the pinned dependency set.
 
+### `npm run convert:maest` fails with a protobuf version error from `tensorflow_decision_forests` or `ydf`
+
+If the traceback mentions a message like `gencode 6.31.1 runtime 5.29.6`, the failure is happening while the generic TensorFlow.js converter bootstraps optional SavedModel support. MAEST frozen-graph conversion does not need that code path.
+
+This repo now uses a dedicated frozen-graph conversion helper that bypasses the eager `tensorflow_decision_forests` import for `npm run convert:maest`. Pull the latest repo changes and rerun:
+
+```bash
+npm run convert:maest -- /path/to/model.pb /path/to/model.json
+```
+
 ### I only have an `.onnx` file
 
 That is **not enough** for this app. The renderer expects a **TensorFlow.js graph model** (`model.json` + `group*.bin` shards).
