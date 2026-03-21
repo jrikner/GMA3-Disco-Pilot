@@ -68,9 +68,10 @@ function runCommand(command, args, options = {}) {
 
 async function inspectPython(command) {
   return new Promise((resolve) => {
+    const probeMarker = '__GMA3_DISCO_PILOT_PYTHON_PROBE__'
     const child = spawn(
       command,
-      ['-c', 'import importlib.util, json, sys; print(json.dumps({"major": sys.version_info.major, "minor": sys.version_info.minor, "micro": sys.version_info.micro, "hasTensorflowJs": bool(importlib.util.find_spec("tensorflowjs.converters.converter"))}))'],
+      ['-c', `import importlib.util, json, sys; print("${probeMarker}" + json.dumps({"major": sys.version_info.major, "minor": sys.version_info.minor, "micro": sys.version_info.micro, "hasTensorflowJs": bool(importlib.util.find_spec("tensorflowjs.converters.converter"))}))`],
       {
         cwd: repoRoot,
         stdio: ['ignore', 'pipe', 'ignore'],
@@ -94,7 +95,17 @@ async function inspectPython(command) {
       }
 
       try {
-        const parsed = JSON.parse(stdout.trim())
+        const probeLine = stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find((line) => line.startsWith(probeMarker))
+
+        if (!probeLine) {
+          resolve(null)
+          return
+        }
+
+        const parsed = JSON.parse(probeLine.slice(probeMarker.length))
         resolve({
           command,
           version: `${parsed.major}.${parsed.minor}.${parsed.micro}`,
