@@ -5,7 +5,9 @@ import { spawn } from 'node:child_process'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-const repoRoot = path.resolve(__dirname, '..')
+const scriptRepoRoot = path.resolve(__dirname, '..')
+const repoRoot = process.cwd()
+const candidateRepoRoots = [...new Set([repoRoot, scriptRepoRoot])]
 const modelsDir = path.join(repoRoot, 'public', 'models')
 const outputDir = path.join(modelsDir, 'maest-30s-pw')
 
@@ -110,13 +112,16 @@ function formatInterpreterStatus(candidate) {
 }
 
 async function findPython() {
-  const venvPython = process.platform === 'win32'
-    ? path.join(repoRoot, '.venv-maest', 'Scripts', 'python.exe')
-    : path.join(repoRoot, '.venv-maest', 'bin', 'python')
-
   const candidates = [
     process.env.PYTHON,
-    venvPython,
+    ...candidateRepoRoots.flatMap((rootDir) => process.platform === 'win32'
+      ? [
+          path.join(rootDir, '.venv-maest', 'Scripts', 'python.exe'),
+        ]
+      : [
+          path.join(rootDir, '.venv-maest', 'bin', 'python'),
+          path.join(rootDir, '.venv-maest', 'bin', 'python3'),
+        ]),
     'python3.12',
     'python3.11',
     'python3.10',
@@ -127,9 +132,17 @@ async function findPython() {
 
   const uniqueCandidates = [...new Set(candidates)]
   const inspectedCandidates = []
+  const repoVenvCandidates = new Set(
+    candidateRepoRoots.flatMap((rootDir) => process.platform === 'win32'
+      ? [path.join(rootDir, '.venv-maest', 'Scripts', 'python.exe')]
+      : [
+          path.join(rootDir, '.venv-maest', 'bin', 'python'),
+          path.join(rootDir, '.venv-maest', 'bin', 'python3'),
+        ]),
+  )
 
   for (const candidate of uniqueCandidates) {
-    if (candidate === venvPython && !(await exists(candidate))) continue
+    if (repoVenvCandidates.has(candidate) && !(await exists(candidate))) continue
 
     const inspected = await inspectPython(candidate)
     if (!inspected) continue
@@ -143,7 +156,7 @@ async function findPython() {
 
   if (inspectedCandidates.length) {
     const checked = inspectedCandidates.map(formatInterpreterStatus).join(', ')
-    const repoVenvNeedsSetup = inspectedCandidates.some((candidate) => candidate.command === venvPython && !candidate.hasTensorflowJs)
+    const repoVenvNeedsSetup = inspectedCandidates.some((candidate) => repoVenvCandidates.has(candidate.command) && !candidate.hasTensorflowJs)
     throw new Error(
       `${repoVenvNeedsSetup
         ? 'The repo-local .venv-maest exists, but it is missing the tensorflowjs converter packages. '
@@ -153,7 +166,11 @@ async function findPython() {
     )
   }
 
-  throw new Error('Could not find python3 or python on PATH. On macOS, install Python 3 and rerun npm run setup:python-ml.')
+  const checkedRepoRoots = candidateRepoRoots.map((rootDir) => path.join(rootDir, '.venv-maest')).join(', ')
+  throw new Error(
+    `Could not find a usable Python interpreter. Checked repo-local virtualenv locations (${checkedRepoRoots}) plus python3.12/python3.11/python3.10/python3.9/python3/python on PATH. ` +
+    'On macOS, install Python 3 and rerun npm run setup:python-ml.',
+  )
 }
 
 async function main() {
