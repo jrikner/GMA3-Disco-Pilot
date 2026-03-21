@@ -91,8 +91,9 @@ def main() -> int:
         if error.name == "pkg_resources":
             raise RuntimeError(
                 "The selected Python environment is missing setuptools/pkg_resources. "
-                "Run `npm run setup:python-ml` again, or install setuptools into that venv with "
-                "`python -m pip install --upgrade setuptools`."
+                "Recent setuptools releases can omit pkg_resources, so rerun "
+                "`npm run setup:python-ml` or install a compatible setuptools build with "
+                "`python -m pip install --upgrade 'setuptools>=70,<81'`."
             ) from error
         raise
 
