@@ -67,10 +67,12 @@ brew install node
 
 ### Install Python 3
 
+TensorFlow `2.17.1` installs cleanly on Python **3.9-3.12**. If your default Homebrew `python3` is newer than that, install a supported version explicitly:
+
 Using Homebrew:
 
 ```bash
-brew install python
+brew install python@3.12
 ```
 
 ### Create the Python ML environment used by the converter
@@ -85,7 +87,9 @@ That command creates `.venv-maest` and installs the conversion dependencies used
 - `tf-keras==2.17.0`
 - `tensorflowjs==4.22.0`
 
-> On macOS this is important because `python` is often missing while `python3` exists. The converter in this repo now automatically prefers `python3` and falls back to `python`.
+> On macOS this is important because `python` is often missing while `python3` exists. The setup script now prefers `python3.12`, `python3.11`, `python3.10`, and `python3.9` before generic `python3`/`python`, because TensorFlow `2.17.1` does not publish wheels for newer Python releases such as `3.14`.
+>
+> If `.venv-maest` already exists but was created with an incompatible or different Python release, the setup script recreates it automatically before installing packages.
 >
 > It also prefers the repo-local `.venv-maest/bin/python` when that environment exists, so you do not need to manually activate it before running `npm run convert:maest`.
 
@@ -245,6 +249,21 @@ If you want to use your own interpreter instead of `.venv-maest`, install the re
 ```bash
 python3 -m pip install tensorflow==2.17.1 tf-keras==2.17.0 tensorflowjs==4.22.0
 ```
+
+### `npm run setup:python-ml` fails with `No matching distribution found for tensorflow==2.17.1`
+
+That usually means you are using a Python version that TensorFlow `2.17.1` does not support. A common case on macOS is Homebrew Python `3.14`.
+
+Install a supported interpreter such as Python `3.12`, then rerun setup:
+
+```bash
+brew install python@3.12
+npm run setup:python-ml
+```
+
+The setup script now prefers `python3.12`, `python3.11`, `python3.10`, and `python3.9` automatically when they are available.
+
+If `.venv-maest` was previously created with Python `3.14`, rerunning `npm run setup:python-ml` now recreates that environment automatically.
 
 ### I only have an `.onnx` file
 
