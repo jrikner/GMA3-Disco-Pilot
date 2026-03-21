@@ -64,11 +64,27 @@ function runCommand(command, args, options = {}) {
   })
 }
 
+async function ensureTensorflowJsConverter(python) {
+  try {
+    await runCommand(python, ['-c', 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("tensorflowjs.converters.converter") else 1)'], { stdio: 'ignore' })
+  } catch {
+    throw new Error(
+      `Python interpreter "${python}" is available, but the tensorflowjs converter module is not installed. ` +
+      'Run `npm run setup:python-ml` to create the repo venv, or install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0 into that interpreter with pip.',
+    )
+  }
+}
+
 async function findPython() {
-  const candidates = [process.env.PYTHON, 'python3', 'python'].filter(Boolean)
+  const venvPython = process.platform === 'win32'
+    ? path.join(repoRoot, '.venv-maest', 'Scripts', 'python.exe')
+    : path.join(repoRoot, '.venv-maest', 'bin', 'python')
+
+  const candidates = [process.env.PYTHON, venvPython, 'python3', 'python'].filter(Boolean)
 
   for (const candidate of candidates) {
     try {
+      if (candidate === venvPython && !(await exists(candidate))) continue
       await runCommand(candidate, ['--version'], { stdio: 'ignore' })
       return candidate
     } catch {
@@ -93,6 +109,7 @@ async function main() {
   if (!(await exists(metadataPath))) throw new Error(`Metadata JSON not found: ${metadataPath}`)
 
   const python = await findPython()
+  await ensureTensorflowJsConverter(python)
   const metadata = await readMetadata(metadataPath)
   await fs.mkdir(modelsDir, { recursive: true })
   await fs.mkdir(outputDir, { recursive: true })
@@ -130,6 +147,8 @@ main().catch((error) => {
   console.error(`✖ ${error.message}`)
   console.error('\nIf TensorFlow.js conversion tools are not installed, run:')
   console.error('  npm run setup:python-ml')
-  console.error('  # or inside your own venv: python3 -m pip install tensorflow==2.17.1 tf-keras==2.17.0 tensorflowjs==4.22.0')
+  console.error('  # or inside your own venv: python3 -m pip install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0')
+  console.error('\nHomebrew installs Python itself, but not Python packages like tensorflowjs.')
+  console.error('Install those with pip inside a venv, or let this repo create .venv-maest with npm run setup:python-ml.')
   process.exit(1)
 })
