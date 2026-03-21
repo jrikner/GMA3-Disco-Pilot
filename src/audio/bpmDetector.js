@@ -24,7 +24,7 @@ import {
   estimateTempoFromPeakIntervals,
   getMedian,
   normalizeBpmToReference,
-} from './tempoAnalysis.js'
+} from './tempoAnalysis.mjs'
 
 const BUFFER_SIZE = 4096
 const SAMPLE_RATE = 44100
@@ -292,6 +292,7 @@ function handleFrame(features) {
     && ((fluxOnset && energyOnset) || (lowBandOnset && energyOnset))
 
   if (isOnset) {
+    const beatPresent = (now - lastOnsetTime) <= BEAT_ACTIVE_WINDOW_MS
     lastOnsetTime = now
     onsetHistory.push(now)
     onsetHistory = onsetHistory.filter(ts => (now - ts) <= BPM_RESYNC_WINDOW_MS)
@@ -308,7 +309,6 @@ function handleFrame(features) {
     const onsetBpm = estimateOnsetBPM(onsetHistory, smoothedBpm)
     if (onsetBpm) {
       const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
-      const beatPresent = (now - lastOnsetTime) <= BEAT_ACTIVE_WINDOW_MS
       const delta = Math.abs(onsetBpm - smoothedBpm)
 
       let onsetWeight = 0.25

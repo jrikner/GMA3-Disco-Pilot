@@ -1,4 +1,4 @@
-import { analyzeOfflineTempo } from '../src/audio/tempoAnalysis.js'
+import { analyzeOfflineTempo } from '../src/audio/tempoAnalysis.mjs'
 
 const SAMPLE_RATE = 44100
 

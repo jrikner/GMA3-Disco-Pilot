@@ -74,7 +74,6 @@ export default function Dashboard() {
 
   // OSC receive
   const [lastOscReceived, setLastOscReceived] = useState(null)
-  const [oscSendFlash, setOscSendFlash] = useState(false)
 
   // Tonight's context editor visibility
   const [showContextEditor, setShowContextEditor] = useState(false)
