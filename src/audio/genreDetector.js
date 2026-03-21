@@ -1,3 +1,5 @@
+import * as tf from '@tensorflow/tfjs'
+
 /**
  * On-device music genre detection using Essentia.js
  *
@@ -749,6 +751,14 @@ const GENRE_BPM_RANGES = {
   corporate: { min: 50,  max: 125, weight: 0.08 },
 }
 
+// ── Mel spectrogram parameters (must match MAEST training config) ─────────────
+// TensorflowInputMusiCNN uses: frameSize=512, hopSize=256, nMels=96, sr=16000
+// For 30s @ 16kHz: floor(30*16000/256) + 1 = 1876 frames
+const MEL_FRAME_SIZE = 512
+const MEL_HOP_SIZE = 256
+const N_MELS = 96
+const MAEST_TARGET_FRAMES = 1876
+
 const SCORE_SMOOTHING_ALPHA = 0.32  // Slightly lower for more temporal stability
 const CURRENT_GENRE_STICKINESS = 0.06
 const CANDIDATE_GENRE_STICKINESS = 0.03
@@ -756,6 +766,8 @@ const CANDIDATE_GENRE_STICKINESS = 0.03
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let essentiaModule = null
+let tfModel = null
+let tfModelLoadPromise = null
 let modelLoaded = false
 let audioBuffer = []
 let analysisInterval = null
@@ -1100,6 +1112,18 @@ async function loadEssentia() {
         return
       }
 
+      // Pre-load the TF.js model so first inference is fast
+      loadTfMaestModel(availableMaestGraphFilename).then((model) => {
+        if (!model) {
+          detectorStatus = {
+            mode: 'heuristic',
+            reason: 'tfjs_load_failed',
+            detail: `Essentia loaded, but the TF.js MAEST model could not be loaded from ${availableMaestGraphFilename}.`,
+          }
+          modelLoaded = false
+        }
+      }).catch(() => {})
+
       detectorStatus = {
         mode: 'maest',
         reason: 'ready',
@@ -1173,9 +1197,6 @@ function createEssentiaRuntime(wasmModule) {
     TensorflowInputMusiCNN(frame) {
       return algorithms.TensorflowInputMusiCNN(frame)
     },
-    TensorflowPredict2D(features, options) {
-      return algorithms.TensorflowPredict2D(features, options)
-    },
     delete() {
       if (typeof algorithms.delete === 'function') algorithms.delete()
     },
@@ -1183,6 +1204,55 @@ function createEssentiaRuntime(wasmModule) {
       if (typeof algorithms.shutdown === 'function') algorithms.shutdown()
     },
   }
+}
+
+async function loadTfMaestModel(modelUrl) {
+  if (tfModel) return tfModel
+  if (tfModelLoadPromise) return await tfModelLoadPromise
+
+  tfModelLoadPromise = (async () => {
+    try {
+      const model = await tf.loadGraphModel(modelUrl)
+      tfModel = model
+      console.log('[GenreDetector] TF.js MAEST model loaded from', modelUrl)
+      return model
+    } catch (err) {
+      console.warn('[GenreDetector] TF.js model load failed:', formatErrorMessage(err))
+      return null
+    }
+  })()
+
+  return await tfModelLoadPromise
+}
+
+/**
+ * Compute mel spectrogram by applying TensorflowInputMusiCNN frame-by-frame.
+ * Returns a 2D array of shape [N_frames, 96] ready to be shaped into a tensor.
+ */
+function computeMelFrames(essentia, normalizedSamples) {
+  const input = Float32Array.from(normalizedSamples)
+  const melFrames = []
+
+  // Center the signal: pad half a frame on each side (Essentia convention)
+  const halfFrame = Math.floor(MEL_FRAME_SIZE / 2)
+  const padded = new Float32Array(input.length + 2 * halfFrame)
+  padded.set(input, halfFrame)
+
+  for (let start = 0; start + MEL_FRAME_SIZE <= padded.length; start += MEL_HOP_SIZE) {
+    const frame = padded.slice(start, start + MEL_FRAME_SIZE)
+    const frameVec = essentia.arrayToVector(frame)
+    try {
+      const result = essentia.TensorflowInputMusiCNN(frameVec)
+      const bands = essentia.vectorToArray(result.bands)
+      melFrames.push(Array.from(bands))
+    } catch {
+      // skip frames that fail (e.g. silence edge cases)
+    } finally {
+      safeDeleteEssentiaObject(frameVec)
+    }
+  }
+
+  return melFrames
 }
 
 async function loadMaestLabels(labelsUrl = DEFAULT_MAEST_LABELS_URL) {
@@ -1206,20 +1276,62 @@ async function runEssentiaModel(samples) {
     return spectralHeuristic(samples)
   }
 
-  let vectorInput = null
-  let features = null
-
   try {
     const essentia = essentiaModule
     const resampled = resampleWithFilter(samples, INPUT_SAMPLE_RATE, MODEL_SAMPLE_RATE)
     const normalized = normalizeMonoSamples(resampled)
-    vectorInput = essentia.arrayToVector(new Float32Array(normalized))
 
-    // Feature extraction
-    features = essentia.TensorflowInputMusiCNN(vectorInput)
+    // Feature extraction: compute mel spectrogram frame-by-frame via Essentia
+    // TensorflowInputMusiCNN takes one 512-sample frame and returns 96 mel bands.
+    const melFrames = computeMelFrames(essentia, normalized)
+    if (!melFrames.length) {
+      console.warn('[GenreDetector] No mel frames extracted; falling back to spectral heuristic.')
+      return spectralHeuristic(samples)
+    }
 
-    // Model inference (requires loaded TF.js graph model)
-    const predictions = await predictMaest(essentia, features)
+    // Load the TF.js graph model if not already loaded
+    if (!availableMaestGraphFilename) {
+      throw new Error('No compatible MAEST graph model is available')
+    }
+    const model = await loadTfMaestModel(availableMaestGraphFilename)
+    if (!model) {
+      throw new Error(`TF.js model could not be loaded from ${availableMaestGraphFilename}`)
+    }
+
+    // Build tensor [1, N_frames, 96] — pad/trim to MAEST_TARGET_FRAMES
+    const nFrames = melFrames.length
+    const target = MAEST_TARGET_FRAMES
+    const melData = new Float32Array(target * N_MELS)
+    const copyFrames = Math.min(nFrames, target)
+    // If fewer frames than target, fill from the end (most recent audio)
+    const srcOffset = nFrames > target ? nFrames - target : 0
+    const dstOffset = nFrames < target ? target - nFrames : 0
+    for (let i = 0; i < copyFrames; i++) {
+      const row = melFrames[srcOffset + i]
+      const base = (dstOffset + i) * N_MELS
+      for (let j = 0; j < N_MELS; j++) {
+        melData[base + j] = row[j] || 0
+      }
+    }
+
+    const inputTensor = tf.tensor3d(melData, [1, target, N_MELS])
+    let outputData
+    try {
+      const outputTensor = model.execute({ melspectrogram: inputTensor })
+      const tensor = Array.isArray(outputTensor) ? outputTensor[0] : outputTensor
+      outputData = await tensor.data()
+      if (Array.isArray(outputTensor)) outputTensor.forEach((t) => t.dispose())
+      else outputTensor.dispose()
+    } finally {
+      inputTensor.dispose()
+    }
+
+    if (!outputData?.length || !maestLabels?.length) {
+      console.warn('[GenreDetector] MAEST output empty; falling back to spectral heuristic.')
+      return spectralHeuristic(samples)
+    }
+
+    const predictions = Array.from(outputData).map((score, i) => [maestLabels[i] || `label_${i}`, score])
     if (!predictions.length) {
       console.warn('[GenreDetector] MAEST prediction parsing produced no label/score pairs; falling back to spectral heuristic.')
       return spectralHeuristic(samples)
@@ -1237,24 +1349,6 @@ async function runEssentiaModel(samples) {
     }
     console.warn(`[GenreDetector] Model inference failed (${errorMessage}). Disabling Essentia inference for the rest of this session and falling back to the spectral heuristic.`)
     return spectralHeuristic(samples)
-  } finally {
-    safeDeleteEssentiaObject(features)
-    safeDeleteEssentiaObject(vectorInput)
-  }
-}
-
-async function predictMaest(essentia, features) {
-  if (!availableMaestGraphFilename) {
-    throw new Error('No compatible MAEST graph model is available')
-  }
-
-  try {
-    const predictions = await essentia.TensorflowPredict2D(features, { graphFilename: availableMaestGraphFilename })
-    const parsed = parsePredictionOutput(predictions)
-    if (parsed.length > 0) return parsed
-    throw new Error('MAEST prediction output was empty or could not be parsed')
-  } catch (err) {
-    throw new Error(`Graph ${availableMaestGraphFilename} failed: ${formatErrorMessage(err)}`)
   }
 }
 
