@@ -517,9 +517,9 @@ export default function Dashboard() {
           </div>
         )}
 
-        {live.genreDetectorStatus?.mode === 'heuristic' && (
+        {live.genreDetectorStatus && live.genreDetectorStatus.mode !== 'maest' && (
           <div style={{ marginBottom: 12, color: '#fbbf24', fontSize: 11, lineHeight: 1.45 }}>
-            <strong>Genre detector fallback:</strong> {live.genreDetectorStatus.detail}
+            <strong>Genre detector status:</strong> {live.genreDetectorStatus.detail}
           </div>
         )}
 

@@ -1,62 +1,75 @@
-# `public/models/` runtime assets
+# `public/models/` quick guide
 
-This directory is intentionally almost empty in Git. The app looks here at runtime for optional Essentia/MAEST files.
+This folder is **not** fully committed to Git.
 
-## What the app checks for
+You must add the Essentia runtime files and the converted MAEST TensorFlow.js graph yourself.
 
-### Essentia runtime
+---
 
-These files are the minimum runtime bundle for loading Essentia in the browser:
+## 1. Copy the Essentia runtime
 
-- `essentia-wasm.es.js`
-- `essentia-wasm.module.wasm`
-
-### Higher-accuracy MAEST assets
-
-For the full graph-model path, the app also looks for:
-
-- `discogs_519labels.txt`
-- `maest-30s-pw/model.json`
-- every `maest-30s-pw/group*.bin` shard referenced by `model.json`
-
-## Fastest setup
-
-From the repo root, run:
+From the repo root:
 
 ```bash
 npm run setup:models
 ```
 
-Then inspect the result:
+That gives you:
+
+```text
+public/models/essentia-wasm.es.js
+public/models/essentia-wasm.module.wasm
+public/models/essentia.js-core.es.js
+public/models/discogs_519labels.txt
+public/models/maest-30s-pw/metadata.json
+```
+
+---
+
+## 2. Convert the official MAEST model
+
+If you are on macOS, create the Python conversion environment first:
+
+```bash
+npm run setup:python-ml
+```
+
+Then convert the official frozen graph:
+
+```bash
+npm run convert:maest -- /path/to/discogs-maest-30s-pw-519l-2.pb /path/to/discogs-maest-30s-pw-519l-2.json
+```
+
+That creates:
+
+```text
+public/models/maest-30s-pw/model.json
+public/models/maest-30s-pw/group*.bin
+public/models/maest-30s-pw/metadata.json
+```
+
+---
+
+## 3. Verify everything
 
 ```bash
 npm run check:models
 ```
 
-## What `setup:models` actually downloads
+You want all four items to be ready:
 
-If only the `.onnx` file is present, the app now logs a warning and stays on the spectral fallback path instead of repeatedly throwing inference errors. The loader also verifies that `model.json` is a real TensorFlow.js graph manifest and that every referenced `group*.bin` shard is reachable before enabling Essentia inference.
+- Essentia runtime
+- Discogs labels
+- MAEST metadata
+- MAEST TF.js graph
 
-- install `essentia.js` locally with `npm install --no-save essentia.js`
-- copy `node_modules/essentia.js/dist/essentia-wasm.es.js` into this folder
-- copy the published `essentia-wasm*.wasm` file into this folder as `essentia-wasm.module.wasm`
-- try to download `discogs_519labels.txt` from Hugging Face
+---
 
-It does **not** create `maest-30s-pw/model.json`, because this repo does not include a TensorFlow.js MAEST export.
+## 4. Important note
 
-## Why there is no `.json` here by default
+A standalone `.onnx` file is **not** enough for this app.
 
-The browser loader in `src/audio/genreDetector.js` expects a TensorFlow.js graph model export, not a standalone ONNX file. So even if you have `maest-30s-pw.onnx`, the app will not use it directly.
+The renderer expects the **TensorFlow.js** graph export:
 
-If you want full graph inference, either manually place a compatible TensorFlow.js export here or generate one from the official frozen graph + metadata JSON with `npm run convert:maest -- /path/to/model.pb /path/to/model.json`:
-
-```text
-public/models/maest-30s-pw/model.json
-public/models/maest-30s-pw/group*.bin
-```
-
-## Expected outcomes
-
-- **Runtime files missing:** Home shows heuristic mode because Essentia cannot load.
-- **Runtime files present, MAEST graph missing:** app still runs, but on the spectral fallback detector.
-- **Runtime files + labels + MAEST graph present:** full high-accuracy path can load after restart.
+- `model.json`
+- every referenced `group*.bin` shard

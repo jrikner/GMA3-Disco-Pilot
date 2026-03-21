@@ -10,9 +10,12 @@ export default function Home() {
     window.electronAPI?.profileList().then(r => {
       if (r?.success) setSavedProfiles(r.profiles)
     })
-    // Check if Essentia WASM model is present
-    fetch('/models/essentia-wasm.es.js', { method: 'HEAD' })
-      .then(r => setEssentiaPresent(r.ok))
+    // Check if the browser Essentia runtime bundle is present
+    Promise.all([
+      fetch('/models/essentia-wasm.es.js', { method: 'HEAD' }),
+      fetch('/models/essentia.js-core.es.js', { method: 'HEAD' }),
+    ])
+      .then(([loader, core]) => setEssentiaPresent(loader.ok && core.ok))
       .catch(() => setEssentiaPresent(false))
   }, [])
 
@@ -96,9 +99,9 @@ export default function Home() {
           fontSize: 12, color: '#aaa', lineHeight: 1.7,
           WebkitAppRegion: 'no-drag',
         }}>
-          <strong style={{ color: '#f59e0b' }}>Genre detection running in heuristic mode.</strong>
+          <strong style={{ color: '#f59e0b' }}>Genre detection unavailable.</strong>
           <br />
-          For higher accuracy, run <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>npm run setup:models</code>, then either copy a MAEST TensorFlow.js export into{' '}
+          Run <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>npm run setup:models</code> to copy the Essentia browser runtime and download the official Discogs-MAEST metadata. Then copy a TensorFlow.js MAEST export into{' '}
           <code style={{ color: '#e0e0e0', background: '#2a1a00', padding: '1px 5px', borderRadius: 3 }}>
             public/models/
           </code>{' '}

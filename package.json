@@ -8,9 +8,10 @@
     "build": "vite build && electron-builder",
     "preview": "vite preview",
     "test:bpm": "node scripts/test-bpm-detection.mjs",
-    "setup:models": "npm install --no-save essentia.js && node scripts/model-assets.mjs",
+    "setup:models": "node scripts/model-assets.mjs",
     "check:models": "node scripts/model-assets.mjs check",
-    "convert:maest": "node scripts/convert-maest-frozen-model.mjs"
+    "convert:maest": "node scripts/convert-maest-frozen-model.mjs",
+    "setup:python-ml": "node scripts/setup-python-ml.mjs"
   },
   "dependencies": {
     "meyda": "^5.6.2",
@@ -18,7 +19,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ws": "^8.18.0",
-    "zustand": "^5.0.3"
+    "zustand": "^5.0.3",
+    "@tensorflow/tfjs": "^4.22.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
@@ -29,7 +31,8 @@
     "electron-builder": "^25.1.8",
     "vite": "^6.0.5",
     "vite-plugin-electron": "^0.28.8",
-    "wait-on": "^8.0.1"
+    "wait-on": "^8.0.1",
+    "essentia.js": "^0.1.3"
   },
   "build": {
     "appId": "com.jrikner.gma3-disco-pilot",
