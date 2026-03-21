@@ -85,7 +85,16 @@ def main() -> int:
     # module load time. Provide a minimal stub to bypass that optional import.
     sys.modules.setdefault("tensorflow_decision_forests", types.ModuleType("tensorflow_decision_forests"))
 
-    from tensorflowjs.converters import tf_saved_model_conversion_v2
+    try:
+        from tensorflowjs.converters import tf_saved_model_conversion_v2
+    except ModuleNotFoundError as error:
+        if error.name == "pkg_resources":
+            raise RuntimeError(
+                "The selected Python environment is missing setuptools/pkg_resources. "
+                "Run `npm run setup:python-ml` again, or install setuptools into that venv with "
+                "`python -m pip install --upgrade setuptools`."
+            ) from error
+        raise
 
     tf_saved_model_conversion_v2.convert_tf_frozen_model(
         frozen_model_path=frozen_model_path,
