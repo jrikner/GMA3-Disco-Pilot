@@ -32,6 +32,8 @@ let detectorStatus = {
 let runtime = null
 let graphModel = null
 let modelLabels = []
+let modelInputName = 'melspectrogram'
+let modelOutputName = null
 let currentSampleRate = 44100
 let audioBuffer = []
 let analysisInterval = null
@@ -45,6 +47,106 @@ let processorNode = null
 let processorMessagePort = null
 let loadPromise = null
 const loadedWorkletContexts = new WeakSet()
+
+
+function normalizeTensorName(name) {
+  const value = String(name || '').trim()
+  return value.replace(/:\d+$/, '')
+}
+
+function listUniqueTensorNames(values = []) {
+  return [...new Set(values.map((value) => normalizeTensorName(value)).filter(Boolean))]
+}
+
+function getModelInputCandidates(model) {
+  return listUniqueTensorNames([
+    model?.inputs?.[0]?.name,
+    ...(Array.isArray(model?.inputNodes) ? model.inputNodes : []),
+    ...(Array.isArray(model?.executor?.graph?.inputs) ? model.executor.graph.inputs.map((entry) => entry?.name) : []),
+    'melspectrogram',
+  ])
+}
+
+function getModelOutputCandidates(model) {
+  return listUniqueTensorNames([
+    ...(Array.isArray(model?.outputs) ? model.outputs.map((entry) => entry?.name) : []),
+    ...(Array.isArray(model?.outputNodes) ? model.outputNodes : []),
+    ...(Array.isArray(model?.executor?.graph?.outputs) ? model.executor.graph.outputs.map((entry) => entry?.name) : []),
+    'PartitionedCall/Identity_13',
+  ])
+}
+
+function looksLikeLabelOutput(tensorShape, expectedLabelCount) {
+  if (!Array.isArray(tensorShape) || !expectedLabelCount) return false
+  const numericShape = tensorShape.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)
+  if (!numericShape.length) return false
+  const lastDimension = numericShape[numericShape.length - 1]
+  return lastDimension === expectedLabelCount
+}
+
+async function resolveModelIo(model, expectedLabelCount) {
+  const inputCandidates = getModelInputCandidates(model)
+  const outputCandidates = getModelOutputCandidates(model)
+
+  const preferredInput = inputCandidates[0] || 'melspectrogram'
+
+  const shapedOutput = outputCandidates.find((candidate) => {
+    const matchingOutput = Array.isArray(model?.outputs)
+      ? model.outputs.find((entry) => normalizeTensorName(entry?.name) === candidate)
+      : null
+    return looksLikeLabelOutput(matchingOutput?.shape, expectedLabelCount)
+  })
+
+  if (shapedOutput) {
+    return {
+      inputName: preferredInput,
+      outputName: shapedOutput,
+    }
+  }
+
+  if (outputCandidates.length <= 1 && inputCandidates.length <= 1) {
+    return {
+      inputName: preferredInput,
+      outputName: outputCandidates[0] || null,
+    }
+  }
+
+  const probeTensor = tf.zeros([1, MAEST_PATCH_FRAMES, MAEST_BANDS], 'float32')
+
+  try {
+    for (const inputName of inputCandidates.length ? inputCandidates : [preferredInput]) {
+      for (const outputName of outputCandidates) {
+        try {
+          const rawOutput = typeof model.executeAsync === 'function'
+            ? await model.executeAsync({ [inputName]: probeTensor }, outputName)
+            : model.execute({ [inputName]: probeTensor }, outputName)
+
+          const tensor = Array.isArray(rawOutput) ? rawOutput[0] : rawOutput
+          const values = await tensor?.data?.()
+          const valueCount = values?.length || 0
+          const matchesLabelCount = valueCount === expectedLabelCount || looksLikeLabelOutput(tensor?.shape, expectedLabelCount)
+          tf.dispose(rawOutput)
+
+          if (matchesLabelCount) {
+            return {
+              inputName,
+              outputName,
+            }
+          }
+        } catch {
+          // Ignore incompatible endpoints while probing model I/O.
+        }
+      }
+    }
+  } finally {
+    probeTensor.dispose()
+  }
+
+  return {
+    inputName: preferredInput,
+    outputName: outputCandidates[0] || null,
+  }
+}
 
 function normalizeScoreMap(scoreMap) {
   const normalized = Object.fromEntries(APP_GENRES.map((genre) => [genre, Number(scoreMap[genre] || 0)]))
@@ -218,12 +320,14 @@ async function loadModelAssets() {
   }
 
   const model = await tf.loadGraphModel(DEFAULT_GRAPH_URL, { onProgress: undefined })
+  const modelIo = await resolveModelIo(model, labels.length)
 
   return {
     manifest,
     metadata,
     labels,
     model,
+    modelIo,
   }
 }
 
@@ -246,11 +350,13 @@ async function loadDetector() {
       const assets = await loadModelAssets()
       graphModel = assets.model
       modelLabels = assets.labels
+      modelInputName = assets.modelIo?.inputName || 'melspectrogram'
+      modelOutputName = assets.modelIo?.outputName || null
 
       detectorStatus = {
         mode: 'maest',
         reason: 'ready',
-        detail: `Loaded Essentia preprocessing and Discogs-MAEST (${modelLabels.length} labels).`,
+        detail: `Loaded Essentia preprocessing and Discogs-MAEST (${modelLabels.length} labels; input: ${modelInputName}; output: ${modelOutputName || 'default'}).`,
       }
     } catch (error) {
       detectorStatus = {
@@ -366,17 +472,27 @@ async function predictMaest(samples) {
   const flattenedPatch = extractMaestPatch(normalized)
 
   const input = tf.tensor(flattenedPatch, [1, MAEST_PATCH_FRAMES, MAEST_BANDS], 'float32')
-  const modelInputs = { melspectrogram: input }
+  const inputName = modelInputName || 'melspectrogram'
+  const modelInputs = { [inputName]: input }
 
   try {
-    const rawOutput = typeof graphModel.executeAsync === 'function'
-      ? await graphModel.executeAsync(modelInputs, 'PartitionedCall/Identity_13')
-      : graphModel.execute(modelInputs, 'PartitionedCall/Identity_13')
+    const rawOutput = modelOutputName
+      ? (typeof graphModel.executeAsync === 'function'
+          ? await graphModel.executeAsync(modelInputs, modelOutputName)
+          : graphModel.execute(modelInputs, modelOutputName))
+      : (typeof graphModel.executeAsync === 'function'
+          ? await graphModel.executeAsync(modelInputs)
+          : graphModel.execute(modelInputs))
 
     const tensor = Array.isArray(rawOutput) ? rawOutput[0] : rawOutput
     const values = await tensor.data()
     const output = Array.from(values)
     tf.dispose(rawOutput)
+
+    if (modelLabels.length && output.length !== modelLabels.length) {
+      throw new Error(`MAEST output size mismatch: expected ${modelLabels.length}, received ${output.length}${modelOutputName ? ` from ${modelOutputName}` : ''}.`)
+    }
+
     return output
   } finally {
     input.dispose()
