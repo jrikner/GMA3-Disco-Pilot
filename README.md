@@ -238,6 +238,8 @@ The converter now prefers `python3`, but Python 3 still needs to be installed fi
 
 `brew install python` only installs the Python interpreter. It does **not** install Python packages such as `tensorflow`, `tf-keras`, or `tensorflowjs`.
 
+On Python 3.12+, `pkg_resources` also comes from `setuptools`, so the repo setup now upgrades `setuptools` inside `.venv-maest` as part of `npm run setup:python-ml`. If you created the venv before this fix, rerun setup once to repair it.
+
 `npm run convert:maest` now uses the repo-local virtualenv executable directly when `.venv-maest/bin/python` or `.venv-maest/bin/python3` exists, and otherwise checks several Python candidates on your `PATH` and reports which ones have the `tensorflowjs` converter installed. It also resolves the repo root from both your current directory and the converter script path. If the repo-local `.venv-maest` exists but is missing packages, rerun setup to repair it:
 
 ```bash

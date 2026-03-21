@@ -8,6 +8,7 @@ const isWindows = process.platform === 'win32'
 const MIN_SUPPORTED_MINOR = 9
 const MAX_SUPPORTED_MINOR = 12
 const pythonMlDependencies = [
+  'setuptools>=70',
   'tensorflow==2.19.0',
   'tf-keras==2.19.0',
   'tensorflowjs==4.22.0',
@@ -168,7 +169,7 @@ async function main() {
     await run(python, ['-m', 'venv', venvDir])
   }
 
-  await run(venvPython, ['-m', 'pip', 'install', '--upgrade', 'pip'])
+  await run(venvPython, ['-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel'])
   await run(venvPython, ['-m', 'pip', 'install', ...pythonMlDependencies])
 
   console.log('\n✔ Python MAEST conversion environment is ready.')
