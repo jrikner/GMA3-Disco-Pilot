@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import useStore from './store/appState.js'
+import { getAppAssetUrl } from './utils/appAssetUrl.js'
 
 export default function Home() {
   const { setScreen, updateSession } = useStore()
@@ -12,8 +13,8 @@ export default function Home() {
     })
     // Check if the browser Essentia runtime bundle is present
     Promise.all([
-      fetch('/models/essentia-wasm.es.js', { method: 'HEAD' }),
-      fetch('/models/essentia.js-core.es.js', { method: 'HEAD' }),
+      fetch(getAppAssetUrl('models/essentia-wasm.es.js'), { method: 'HEAD' }),
+      fetch(getAppAssetUrl('models/essentia.js-core.es.js'), { method: 'HEAD' }),
     ])
       .then(([loader, core]) => setEssentiaPresent(loader.ok && core.ok))
       .catch(() => setEssentiaPresent(false))
