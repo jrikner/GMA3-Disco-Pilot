@@ -18,6 +18,7 @@
  */
 
 import Meyda from 'meyda'
+import { getAppAssetUrl } from '../utils/appAssetUrl.js'
 import {
   computeAdaptiveThreshold,
   estimateTempoFromOnsetSignal,
@@ -61,7 +62,7 @@ const BPM_CLUSTER_RADIUS = 2  // Group BPM candidates within ±2 BPM
 const MEDIAN_HISTORY_SIZE = 7
 const BPM_MEDIAN_WEIGHT = 0.3  // Blend median estimate into final output
 const FEATURE_EXTRACTORS = ['rms', 'energy', 'spectralCentroid', 'zcr', 'amplitudeSpectrum']
-const BPM_BUFFER_WORKLET_URL = '/worklets/bpm-buffer-processor.js'
+const BPM_BUFFER_WORKLET_URL = getAppAssetUrl('worklets/bpm-buffer-processor.js')
 
 let analyzer = null
 let onsetHistory = []               // timestamps of detected onsets

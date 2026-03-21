@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs'
+import { getAppAssetUrl } from '../utils/appAssetUrl.js'
 import { APP_GENRES, buildGenreScoreMap, mapDiscogsLabelToGenre, parseDiscogsLabel } from './genreTaxonomy.js'
 
 const ANALYSIS_INTERVAL_MS = 5000
@@ -17,10 +18,13 @@ const CURRENT_GENRE_STICKINESS = 0.08
 const CANDIDATE_GENRE_STICKINESS = 0.05
 const MIN_CONFIDENCE = 0.18
 const MIN_MARGIN = 0.035
-const DEFAULT_LABELS_URL = '/models/discogs_519labels.txt'
-const DEFAULT_METADATA_URL = '/models/maest-30s-pw/metadata.json'
-const DEFAULT_GRAPH_URL = '/models/maest-30s-pw/model.json'
-const GENRE_BUFFER_WORKLET_URL = '/worklets/genre-buffer-processor.js'
+const DEFAULT_LABELS_URL = getAppAssetUrl('models/discogs_519labels.txt')
+const DEFAULT_METADATA_URL = getAppAssetUrl('models/maest-30s-pw/metadata.json')
+const DEFAULT_GRAPH_URL = getAppAssetUrl('models/maest-30s-pw/model.json')
+const ESSENTIA_WASM_MODULE_URL = getAppAssetUrl('models/essentia-wasm.es.js')
+const ESSENTIA_WASM_BINARY_URL = getAppAssetUrl('models/essentia-wasm.module.wasm')
+const ESSENTIA_CORE_MODULE_URL = getAppAssetUrl('models/essentia.js-core.es.js')
+const GENRE_BUFFER_WORKLET_URL = getAppAssetUrl('worklets/genre-buffer-processor.js')
 
 let callback = null
 let detectorStatus = {
@@ -265,6 +269,59 @@ function parseLabelsFromText(text) {
     .filter(Boolean)
 }
 
+async function assetExists(url) {
+  for (const method of ['HEAD', 'GET']) {
+    try {
+      const response = await fetch(url, { method, cache: 'no-store' })
+      if (response.ok) return true
+    } catch {
+      // Ignore failed probes and try the next lightweight strategy.
+    }
+  }
+
+  return false
+}
+
+function buildMissingAssetDetail(preflight) {
+  const missing = []
+  if (!preflight.runtimeLoaderReady) missing.push('models/essentia-wasm.es.js')
+  if (!preflight.runtimeBinaryReady) missing.push('models/essentia-wasm.module.wasm')
+  if (!preflight.runtimeCoreReady) missing.push('models/essentia.js-core.es.js')
+  if (!preflight.graphReady) missing.push('models/maest-30s-pw/model.json')
+  if (!preflight.labelsReady && !preflight.metadataReady) missing.push('models/discogs_519labels.txt or models/maest-30s-pw/metadata.json')
+
+  if (!missing.length) return 'Required MAEST assets are unavailable.'
+  return `Skipping MAEST initialization because required assets are missing: ${missing.join(', ')}.`
+}
+
+async function preflightDetectorAssets() {
+  const [
+    runtimeLoaderReady,
+    runtimeBinaryReady,
+    runtimeCoreReady,
+    graphReady,
+    labelsReady,
+    metadataReady,
+  ] = await Promise.all([
+    assetExists(ESSENTIA_WASM_MODULE_URL),
+    assetExists(ESSENTIA_WASM_BINARY_URL),
+    assetExists(ESSENTIA_CORE_MODULE_URL),
+    assetExists(DEFAULT_GRAPH_URL),
+    assetExists(DEFAULT_LABELS_URL),
+    assetExists(DEFAULT_METADATA_URL),
+  ])
+
+  return {
+    runtimeLoaderReady,
+    runtimeBinaryReady,
+    runtimeCoreReady,
+    graphReady,
+    labelsReady,
+    metadataReady,
+    ready: runtimeLoaderReady && runtimeBinaryReady && runtimeCoreReady && graphReady && (labelsReady || metadataReady),
+  }
+}
+
 async function loadLabelsAndMetadata() {
   const [metadata, labelText] = await Promise.all([
     fetchJson(DEFAULT_METADATA_URL),
@@ -283,8 +340,8 @@ async function loadLabelsAndMetadata() {
 
 async function resolveRuntime() {
   const [wasmModuleImport, coreModuleImport] = await Promise.all([
-    import(/* @vite-ignore */ new URL('/models/essentia-wasm.es.js', window.location.origin).href),
-    import(/* @vite-ignore */ new URL('/models/essentia.js-core.es.js', window.location.origin).href),
+    import(/* @vite-ignore */ ESSENTIA_WASM_MODULE_URL),
+    import(/* @vite-ignore */ ESSENTIA_CORE_MODULE_URL),
   ])
 
   const wasmModule = wasmModuleImport?.EssentiaWASM || wasmModuleImport?.default?.EssentiaWASM || wasmModuleImport?.default
@@ -307,7 +364,7 @@ async function resolveRuntime() {
 async function loadModelAssets() {
   const manifest = await fetchJson(DEFAULT_GRAPH_URL)
   if (!manifest) {
-    throw new Error('No TensorFlow.js MAEST graph model was found at /public/models/maest-30s-pw/model.json.')
+    throw new Error('No TensorFlow.js MAEST graph model was found in models/maest-30s-pw/model.json.')
   }
 
   if (!manifest.modelTopology || !Array.isArray(manifest.weightsManifest)) {
@@ -346,6 +403,18 @@ async function loadDetector() {
     }
 
     try {
+      const preflight = await preflightDetectorAssets()
+      if (!preflight.ready) {
+        const detail = buildMissingAssetDetail(preflight)
+        detectorStatus = {
+          mode: 'unavailable',
+          reason: 'missing_assets',
+          detail,
+        }
+        console.warn('[GenreDetector] Skipping MAEST initialization because required assets are unavailable.', preflight)
+        return
+      }
+
       runtime = await resolveRuntime()
       const assets = await loadModelAssets()
       graphModel = assets.model
