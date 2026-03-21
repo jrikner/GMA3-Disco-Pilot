@@ -44,7 +44,7 @@ brew install python@3.12
 
 If `.venv-maest` already exists from an older or incompatible Python install, `npm run setup:python-ml` recreates it automatically.
 
-The setup script also pins a compatible TensorFlow stack for conversion, including `tensorflow-decision-forests==1.10.1`, so pip does not drift to a newer conflicting release.
+The setup script also pins a compatible TensorFlow stack for conversion, including `tensorflow-decision-forests==1.12.0`, so pip does not drift to a newer conflicting release.
 
 Then convert the official frozen graph:
 

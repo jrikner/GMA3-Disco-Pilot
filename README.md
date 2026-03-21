@@ -67,7 +67,7 @@ brew install node
 
 ### Install Python 3
 
-TensorFlow `2.17.1` installs cleanly on Python **3.9-3.12**. If your default Homebrew `python3` is newer than that, install a supported version explicitly:
+The TensorFlow.js conversion stack used by this repo installs cleanly on Python **3.9-3.12**. If your default Homebrew `python3` is newer than that, install a supported version explicitly:
 
 Using Homebrew:
 
@@ -83,12 +83,12 @@ npm run setup:python-ml
 
 That command creates `.venv-maest` and installs the conversion dependencies used by this repo:
 
-- `tensorflow==2.17.1`
-- `tf-keras==2.17.0`
+- `tensorflow==2.19.0`
+- `tf-keras==2.19.0`
 - `tensorflowjs==4.22.0`
-- `tensorflow-decision-forests==1.10.1`
+- `tensorflow-decision-forests==1.12.0`
 
-> On macOS this is important because `python` is often missing while `python3` exists. The setup script now prefers `python3.12`, `python3.11`, `python3.10`, and `python3.9` before generic `python3`/`python`, because TensorFlow `2.17.1` does not publish wheels for newer Python releases such as `3.14`.
+> On macOS this is important because `python` is often missing while `python3` exists. The setup script now prefers `python3.12`, `python3.11`, `python3.10`, and `python3.9` before generic `python3`/`python`, because the TensorFlow.js conversion stack used here does not publish compatible wheels for newer Python releases such as `3.14`.
 >
 > If `.venv-maest` already exists but was created with an incompatible or different Python release, the setup script recreates it automatically before installing packages.
 >
@@ -248,12 +248,12 @@ npm run convert:maest -- /path/to/model.pb /path/to/model.json
 If you want to use your own interpreter instead of `.venv-maest`, install the required packages with pip into that same interpreter:
 
 ```bash
-python3 -m pip install tensorflow==2.17.1 tf-keras==2.17.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.10.1
+python3 -m pip install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0
 ```
 
-### `npm run setup:python-ml` fails with `No matching distribution found for tensorflow==2.17.1`
+### `npm run setup:python-ml` fails with `No matching distribution found for tensorflow`
 
-That usually means you are using a Python version that TensorFlow `2.17.1` does not support. A common case on macOS is Homebrew Python `3.14`.
+That usually means you are using a Python version that the conversion stack in this repo does not support. A common case on macOS is Homebrew Python `3.14`.
 
 Install a supported interpreter such as Python `3.12`, then rerun setup:
 
@@ -272,10 +272,10 @@ This usually means pip selected an incompatible `tensorflow-decision-forests` re
 
 The setup script now pins the compatible combination used by this repo:
 
-- `tensorflow==2.17.1`
-- `tf-keras==2.17.0`
+- `tensorflow==2.19.0`
+- `tf-keras==2.19.0`
 - `tensorflowjs==4.22.0`
-- `tensorflow-decision-forests==1.10.1`
+- `tensorflow-decision-forests==1.12.0`
 
 If you created `.venv-maest` before this fix, rerun `npm run setup:python-ml` and the environment will be updated with the pinned dependency set.
 

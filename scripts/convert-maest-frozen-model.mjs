@@ -70,7 +70,7 @@ async function ensureTensorflowJsConverter(python) {
   } catch {
     throw new Error(
       `Python interpreter "${python}" is available, but the tensorflowjs converter module is not installed. ` +
-      'Run `npm run setup:python-ml` to create the repo venv, or install tensorflow==2.17.1 tf-keras==2.17.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.10.1 into that interpreter with pip.',
+      'Run `npm run setup:python-ml` to create the repo venv, or install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0 into that interpreter with pip.',
     )
   }
 }
@@ -147,7 +147,7 @@ main().catch((error) => {
   console.error(`✖ ${error.message}`)
   console.error('\nIf TensorFlow.js conversion tools are not installed, run:')
   console.error('  npm run setup:python-ml')
-  console.error('  # or inside your own venv: python3 -m pip install tensorflow==2.17.1 tf-keras==2.17.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.10.1')
+  console.error('  # or inside your own venv: python3 -m pip install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0')
   console.error('\nHomebrew installs Python itself, but not Python packages like tensorflowjs.')
   console.error('Install those with pip inside a venv, or let this repo create .venv-maest with npm run setup:python-ml.')
   process.exit(1)

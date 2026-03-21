@@ -8,10 +8,10 @@ const isWindows = process.platform === 'win32'
 const MIN_SUPPORTED_MINOR = 9
 const MAX_SUPPORTED_MINOR = 12
 const pythonMlDependencies = [
-  'tensorflow==2.17.1',
-  'tf-keras==2.17.0',
+  'tensorflow==2.19.0',
+  'tf-keras==2.19.0',
   'tensorflowjs==4.22.0',
-  'tensorflow-decision-forests==1.10.1',
+  'tensorflow-decision-forests==1.12.0',
 ]
 
 function run(command, args, options = {}) {
@@ -126,7 +126,7 @@ async function findPython() {
   if (unsupported.length) {
     const seen = unsupported.map(({ candidate, version }) => `${candidate} (${formatPythonVersion(version)})`).join(', ')
     throw new Error(
-      `Found Python interpreter(s), but none use a TensorFlow 2.17-compatible version. ` +
+      `Found Python interpreter(s), but none use a TensorFlow.js conversion-compatible version. ` +
       `Detected: ${seen}. Use Python 3.9-3.12 instead (for example Homebrew python@3.12), then rerun npm run setup:python-ml.`,
     )
   }
