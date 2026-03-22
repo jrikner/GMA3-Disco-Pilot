@@ -847,7 +847,7 @@ export default function Dashboard() {
           const isActive = !isDisabled && (profile.phasers[p.key] || moverProfileActive)
           return (
             <div key={p.key} className={styles.phaserRow}>
-              <span className={styles.phaserLabel}>
+              <span id={`phaser-label-${p.key}`} className={styles.phaserLabel}>
                 {p.label}
                 {isActive && <span style={{ marginLeft: 8, color: '#22c55e', fontSize: 11 }}>● active</span>}
                 {isDisabled && <span style={{ marginLeft: 8, color: '#555', fontSize: 11 }}>off</span>}
@@ -855,6 +855,10 @@ export default function Dashboard() {
               <label className={styles.toggleSwitch}>
                 <input
                   type="checkbox"
+                  role="switch"
+                  aria-label={p.label}
+                  aria-labelledby={`phaser-label-${p.key}`}
+                  aria-checked={!isDisabled}
                   checked={!isDisabled}
                   onChange={() => togglePhaser(p.key)}
                 />
@@ -866,13 +870,21 @@ export default function Dashboard() {
 
         {/* Strobe kill (dedicated row) */}
         <div className={styles.phaserRow} style={{ marginTop: 8, borderTop: '1px solid #1a1a28', paddingTop: 12 }}>
-          <span className={styles.phaserLabel} style={{ color: overrides.killStrobe ? '#ef4444' : undefined }}>
+          <span
+            id="phaser-label-strobe"
+            className={styles.phaserLabel}
+            style={{ color: overrides.killStrobe ? '#ef4444' : undefined }}
+          >
             Strobe Kill
             {overrides.killStrobe && <span style={{ marginLeft: 8, color: '#ef4444', fontSize: 11 }}>ACTIVE</span>}
           </span>
           <label className={styles.toggleSwitch}>
             <input
               type="checkbox"
+              role="switch"
+              aria-label="Strobe Kill"
+              aria-labelledby="phaser-label-strobe"
+              aria-checked={overrides.killStrobe}
               checked={overrides.killStrobe}
               onChange={() => setKillStrobe(!overrides.killStrobe)}
             />
