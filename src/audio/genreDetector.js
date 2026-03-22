@@ -58,6 +58,24 @@ function normalizeTensorName(name) {
   return value.replace(/:\d+$/, '')
 }
 
+async function runGraphModel(model, inputs, outputName = undefined) {
+  if (typeof model?.execute === 'function') {
+    try {
+      return outputName == null ? model.execute(inputs) : model.execute(inputs, outputName)
+    } catch (error) {
+      if (typeof model?.executeAsync !== 'function') {
+        throw error
+      }
+    }
+  }
+
+  if (typeof model?.executeAsync === 'function') {
+    return outputName == null ? model.executeAsync(inputs) : model.executeAsync(inputs, outputName)
+  }
+
+  throw new Error('Loaded TensorFlow.js graph model does not expose execute() or executeAsync().')
+}
+
 function listUniqueTensorNames(values = []) {
   return [...new Set(values.map((value) => normalizeTensorName(value)).filter(Boolean))]
 }
@@ -121,9 +139,7 @@ async function resolveModelIo(model, expectedLabelCount) {
     for (const inputName of inputCandidates.length ? inputCandidates : [preferredInput]) {
       for (const outputName of outputCandidates) {
         try {
-          const rawOutput = typeof model.executeAsync === 'function'
-            ? await model.executeAsync({ [inputName]: probeTensor }, outputName)
-            : model.execute({ [inputName]: probeTensor }, outputName)
+          const rawOutput = await runGraphModel(model, { [inputName]: probeTensor }, outputName)
 
           const tensor = Array.isArray(rawOutput) ? rawOutput[0] : rawOutput
           const values = await tensor?.data?.()
@@ -545,13 +561,7 @@ async function predictMaest(samples) {
   const modelInputs = { [inputName]: input }
 
   try {
-    const rawOutput = modelOutputName
-      ? (typeof graphModel.executeAsync === 'function'
-          ? await graphModel.executeAsync(modelInputs, modelOutputName)
-          : graphModel.execute(modelInputs, modelOutputName))
-      : (typeof graphModel.executeAsync === 'function'
-          ? await graphModel.executeAsync(modelInputs)
-          : graphModel.execute(modelInputs))
+    const rawOutput = await runGraphModel(graphModel, modelInputs, modelOutputName)
 
     const tensor = Array.isArray(rawOutput) ? rawOutput[0] : rawOutput
     const values = await tensor.data()
