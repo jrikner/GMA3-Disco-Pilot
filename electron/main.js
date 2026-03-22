@@ -125,6 +125,31 @@ function updateDeniedMicrophonePermission() {
   sendMicrophonePermissionState()
 }
 
+const rendererCsp = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' http://localhost:5173 ws://localhost:5173 http://127.0.0.1:5173 ws://127.0.0.1:5173",
+  "media-src 'self' blob:",
+  "worker-src 'self' blob:",
+  "child-src 'self' blob:",
+].join('; ')
+
+function registerContentSecurityPolicy() {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    if (details.resourceType !== 'mainFrame') {
+      callback({ responseHeaders: details.responseHeaders })
+      return
+    }
+
+    const responseHeaders = { ...details.responseHeaders }
+    responseHeaders['Content-Security-Policy'] = [rendererCsp]
+    callback({ responseHeaders })
+  })
+}
+
 function registerPermissionHandlers() {
   const permissionHandler = (webContents, permission, callback, details = {}) => {
     if (permission === 'media' || permission === 'audioCapture') {
@@ -462,6 +487,7 @@ ipcMain.handle('net:fetchJson', async (_, { url, timeoutMs = 10000 } = {}) => {
 // ── App Lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  registerContentSecurityPolicy()
   registerPermissionHandlers()
   await requestMicrophoneAccess()
   createWindow()
