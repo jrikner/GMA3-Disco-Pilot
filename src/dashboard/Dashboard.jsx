@@ -43,6 +43,7 @@ const DROP_CALIBRATION_CUE_PRE_ROLL_SEC = 4
 const DROP_CALIBRATION_CUE_POST_ROLL_SEC = 2
 const AUTO_MIC_RETRY_MS = 2500
 const BPM_HARMONIC_MULTIPLIERS = [0.5, 2 / 3, 0.75, 1, 4 / 3, 1.5, 2]
+const BPM_GENRE_MAX_STEP_PER_FRAME = 2
 const BPM_GENRE_RANGES = {
   edm: [110, 145],
   techno: [118, 155],
@@ -100,8 +101,15 @@ function normalizeBpmByGenre(rawBpm, genre, previousBpm = null) {
   }
 
   if (!inRange.length) {
-    return Math.round(clamp(best, min, max))
+    best = clamp(best, min, max)
   }
+
+  if (Number.isFinite(previousBpm)) {
+    const delta = best - previousBpm
+    const boundedDelta = clamp(delta, -BPM_GENRE_MAX_STEP_PER_FRAME, BPM_GENRE_MAX_STEP_PER_FRAME)
+    best = previousBpm + boundedDelta
+  }
+
   return Math.round(best)
 }
 
