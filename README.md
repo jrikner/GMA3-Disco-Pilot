@@ -6,8 +6,8 @@ This branch uses a rebuilt **Essentia + Discogs-MAEST** genre pipeline:
 
 - **Essentia** for audio preprocessing.
 - **Discogs-MAEST 30s PW 519-label** as the source genre taxonomy.
-- **TensorFlow.js** for the browser/Electron graph runtime.
-- A local mapping layer that collapses the 519 Discogs styles into the app’s larger lighting genres.
+- **TensorFlow.js** for browser/Electron inference.
+- A local mapping layer that collapses the 519 Discogs styles into the app's lighting genres.
 
 ---
 
@@ -15,19 +15,20 @@ This branch uses a rebuilt **Essentia + Discogs-MAEST** genre pipeline:
 
 ### Always required
 
+- **macOS** with microphone access
 - **Node.js 20+**
-- **npm**
-- A working **GrandMA3** OSC setup if you want to control a console
+- **npm** (included with Node)
+- A working **GrandMA3 OSC setup** if you want to control a console live
 
 ### Required only for full genre detection
 
-The app does **not** commit the MAEST model runtime to Git. You must provide these runtime assets yourself:
+The repository does **not** commit the full MAEST runtime to Git. For live genre detection you must provide:
 
 - Essentia browser runtime files
 - MAEST metadata + labels
 - A **TensorFlow.js** export of the official `discogs-maest-30s-pw-519l` frozen graph
 
-If those files are missing, the app still opens, but **live genre detection will stay unavailable** until you add them.
+If these files are missing, the app still opens and BPM works, but **genre detection stays unavailable**.
 
 ---
 
@@ -37,25 +38,23 @@ From the repo root:
 
 ```bash
 npm install
-```
-
-Then copy/download the browser-side Essentia assets:
-
-```bash
 npm run setup:models
-```
-
-Check what is present:
-
-```bash
 npm run check:models
 ```
+
+What this does:
+
+- Installs Node dependencies.
+- Copies Essentia browser runtime files into `public/models/`.
+- Downloads MAEST metadata (and labels when available), then validates model asset status.
+
+At this stage, `check:models` may still report the TF.js graph as missing. That is expected until Section 6 is complete.
 
 ---
 
 ## 3. macOS setup
 
-If you are on a Mac and want the full MAEST conversion pipeline to work cleanly, do this once:
+If you are on macOS and want the full MAEST conversion pipeline, do this once.
 
 ### Install Node
 
@@ -65,34 +64,39 @@ Using Homebrew:
 brew install node
 ```
 
-### Install Python 3
+### Install a compatible Python
 
-The TensorFlow.js conversion stack used by this repo installs cleanly on Python **3.9-3.12**. If your default Homebrew `python3` is newer than that, install a supported version explicitly:
-
-Using Homebrew:
+The conversion stack in this repo supports Python **3.9-3.12**.
 
 ```bash
 brew install python@3.12
 ```
 
-### Create the Python ML environment used by the converter
+If `python3.12` is not found in your shell afterwards, add it to PATH:
+
+```bash
+echo 'export PATH="$(brew --prefix python@3.12)/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+### Create the converter virtual environment
 
 ```bash
 npm run setup:python-ml
 ```
 
-That command creates `.venv-maest` and installs the conversion dependencies used by this repo:
+This creates `.venv-maest` and installs pinned dependencies used by this repo:
 
 - `tensorflow==2.19.0`
 - `tf-keras==2.19.0`
 - `tensorflowjs==4.22.0`
 - `tensorflow-decision-forests==1.12.0`
 
-> On macOS this is important because `python` is often missing while `python3` exists. The setup script now prefers `python3.12`, `python3.11`, `python3.10`, and `python3.9` before generic `python3`/`python`, because the TensorFlow.js conversion stack used here does not publish compatible wheels for newer Python releases such as `3.14`.
->
-> If `.venv-maest` already exists but was created with an incompatible or different Python release, the setup script recreates it automatically before installing packages.
->
-> It also uses the repo-local `.venv-maest/bin/python` or `.venv-maest/bin/python3` directly when that environment exists, so you do not need to manually activate it before running `npm run convert:maest`. The converter checks both the current working directory and the script's own repo path so symlinked repo locations still reuse the repo-managed virtualenv.
+Notes:
+
+- The script prefers `python3.12`, `python3.11`, `python3.10`, then `python3.9`.
+- If `.venv-maest` already exists with the wrong Python release, it is recreated automatically.
+- You do not need to manually activate `.venv-maest` before running `npm run convert:maest`.
 
 ---
 
@@ -104,9 +108,7 @@ Run:
 npm run setup:models
 ```
 
-This copies the Essentia browser runtime into `public/models/` and downloads the official MAEST metadata.
-
-After that, you should have these files:
+After this, you should have:
 
 ```text
 public/models/essentia-wasm.es.js
@@ -116,25 +118,31 @@ public/models/discogs_519labels.txt
 public/models/maest-30s-pw/metadata.json
 ```
 
-If `discogs_519labels.txt` cannot be downloaded directly, the setup script derives it from the official metadata file automatically.
+If direct label download fails, the setup script automatically derives `discogs_519labels.txt` from `metadata.json` when possible.
 
 ---
 
 ## 5. Get the MAEST model
 
-This project is built around the official Essentia MAEST entry:
+This project is built around:
 
 - **Model:** `discogs-maest-30s-pw-519l`
-- **Input expectation:** mono audio at **16 kHz**
-- **Taxonomy:** **519 Discogs music styles**
+- **Input:** mono audio at **16 kHz**
+- **Taxonomy:** **519 Discogs styles**
 
-You need the official frozen graph (`.pb`) and its metadata (`.json`).
+Download the official frozen graph (`.pb`) and metadata (`.json`) from Essentia:
 
-Place them anywhere on your machine, for example:
+- Model index: [https://essentia.upf.edu/models/feature-extractors/maest/](https://essentia.upf.edu/models/feature-extractors/maest/)
+- `.pb`: [https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.pb](https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.pb)
+- `.json`: [https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.json](https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.json)
 
-```text
-~/Downloads/discogs-maest-30s-pw-519l-2.pb
-~/Downloads/discogs-maest-30s-pw-519l-2.json
+Example download commands:
+
+```bash
+curl -L -o ~/Downloads/discogs-maest-30s-pw-519l-2.pb \
+  https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.pb
+curl -L -o ~/Downloads/discogs-maest-30s-pw-519l-2.json \
+  https://essentia.upf.edu/models/feature-extractors/maest/discogs-maest-30s-pw-519l-2.json
 ```
 
 ---
@@ -144,10 +152,12 @@ Place them anywhere on your machine, for example:
 From the repo root:
 
 ```bash
-npm run convert:maest -- ~/Downloads/discogs-maest-30s-pw-519l-2.pb ~/Downloads/discogs-maest-30s-pw-519l-2.json
+npm run convert:maest -- \
+  ~/Downloads/discogs-maest-30s-pw-519l-2.pb \
+  ~/Downloads/discogs-maest-30s-pw-519l-2.json
 ```
 
-That writes:
+This writes:
 
 ```text
 public/models/discogs_519labels.txt
@@ -156,13 +166,13 @@ public/models/maest-30s-pw/model.json
 public/models/maest-30s-pw/group*.bin
 ```
 
-Run the checker again:
+Verify again:
 
 ```bash
 npm run check:models
 ```
 
-You want it to report:
+Expected status:
 
 - Essentia runtime: ready
 - Discogs labels: ready
@@ -173,58 +183,89 @@ You want it to report:
 
 ## 7. Run the app
 
+Development mode:
+
 ```bash
 npm run dev
 ```
 
-If you only want to test the UI/wizard first, you can run the app before the TF.js graph exists. The app will open, but the dashboard will show that genre detection is unavailable until the MAEST graph is installed.
+On first launch:
+
+- Grant macOS microphone permission when prompted.
+- Start with **New Session** to run the wizard.
+
+If you only want to test UI/wizard first, you can run before MAEST conversion is done. The app opens, but genre detection stays unavailable until Section 6 is complete.
+
+Create a macOS app build (DMG):
+
+```bash
+npm run build
+```
+
+Output is written in `dist/` (for example `dist/GMA3 Disco Pilot-0.1.0-arm64.dmg`).
 
 ---
 
 ## 8. Configure GrandMA3
 
-In GrandMA3:
+On GrandMA3:
 
-1. Go to **Menu → System → Network Protocols → OSC**
-2. Enable **OSC Input**
-3. Enable **OSC Output** on port `8001`
-4. Note the MA3 machine IP address
+1. Go to **Menu -> Setup -> Network -> OSC**.
+2. Enable OSC.
+3. Set OSC Input Port (default: `8000`).
+4. Set OSC Output Port to a different port (usually `8001`) for dashboard feedback.
+5. Note the MA3 IP address.
 
-Then in the app:
+In the app:
 
-1. Click **New Session**
-2. Complete the wizard
-3. Enter your MA3 host/port details
-4. Generate/import the plugin files
-5. Calibrate and save the profile
+1. Click **New Session**.
+2. Complete all wizard sections: `Fixture Groups`, `Color Preferences`, `Tonight's Context`, `Free Executor Spaces`, `Generate MA3 Plugin`, `Phaser Plugin`, `OSC Connection`.
+
+Plugin import on MA3:
+
+1. Copy generated plugin files to MA3 plugin storage or USB.
+2. In MA3 go to **Menu -> Plugins -> Import Plugin**.
+3. Import the `.xml` wrapper.
+4. Run the plugin in the Plugins view.
 
 ---
 
 ## 9. What the remodeled detector does
 
-The new detector:
+Live detection and control flow:
 
-1. streams live audio from the worklet
-2. keeps a rolling **30-second** analysis window
-3. resamples that window to **16 kHz**
-4. extracts MAEST-compatible mel features with **Essentia**
-5. runs the converted **TensorFlow.js** MAEST graph
-6. maps the 519 Discogs styles into the app’s broad genres
-7. smooths and stabilizes the result before switching lighting profiles
+1. Captures live audio from selected input device.
+2. Runs BPM estimation with stabilization and manual override support.
+3. Runs drop detection with calibration/best-effort fallback.
+4. Maintains a rolling **30-second** genre analysis window.
+5. Resamples to **16 kHz** and extracts MAEST-compatible mel features with Essentia.
+6. Runs the converted TensorFlow.js MAEST graph (`model.json` + shards).
+7. Maps 519 Discogs styles into app-level lighting genres.
+8. Applies smoothing/hysteresis and optional tonight-context weighting.
+9. Sends OSC look/phaser/master updates to GrandMA3.
 
 ---
 
 ## 10. Troubleshooting
 
-### `npm run check:models` says the graph is missing
+### `npm run check:models` says TF.js graph is missing
 
-You have not converted or copied the TensorFlow.js export yet. Run:
+Run conversion first:
 
 ```bash
 npm run convert:maest -- /path/to/model.pb /path/to/model.json
 ```
 
-### `npm run convert:maest` fails on macOS with `python: command not found`
+### `npm run convert:maest` fails with `python: command not found` on macOS
+
+Install compatible Python and set up repo venv:
+
+```bash
+brew install python@3.12
+npm run setup:python-ml
+```
+
+### `npm run convert:maest` says `tensorflowjs` converter is missing
 
 Run:
 
@@ -232,22 +273,7 @@ Run:
 npm run setup:python-ml
 ```
 
-The converter now prefers `python3`, but Python 3 still needs to be installed first.
-
-### `npm run convert:maest` says the tensorflowjs converter is missing
-
-`brew install python` only installs the Python interpreter. It does **not** install Python packages such as `tensorflow`, `tf-keras`, or `tensorflowjs`.
-
-On Python 3.12+, `pkg_resources` also comes from `setuptools`, so the repo setup now upgrades `setuptools` inside `.venv-maest` as part of `npm run setup:python-ml`. If you created the venv before this fix, rerun setup once to repair it.
-
-`npm run convert:maest` now uses the repo-local virtualenv executable directly when `.venv-maest/bin/python` or `.venv-maest/bin/python3` exists, and otherwise checks several Python candidates on your `PATH` and reports which ones have the `tensorflowjs` converter installed. It also resolves the repo root from both your current directory and the converter script path. If the repo-local `.venv-maest` exists but is missing packages, rerun setup to repair it:
-
-```bash
-npm run setup:python-ml
-npm run convert:maest -- /path/to/model.pb /path/to/model.json
-```
-
-If you want to use your own interpreter instead of `.venv-maest`, install the required packages with pip into that same interpreter:
+or install the same packages into your own interpreter:
 
 ```bash
 python3 -m pip install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 tensorflow-decision-forests==1.12.0
@@ -255,53 +281,26 @@ python3 -m pip install tensorflow==2.19.0 tf-keras==2.19.0 tensorflowjs==4.22.0 
 
 ### `npm run setup:python-ml` fails with `No matching distribution found for tensorflow`
 
-That usually means you are using a Python version that the conversion stack in this repo does not support. A common case on macOS is Homebrew Python `3.14`.
-
-Install a supported interpreter such as Python `3.12`, then rerun setup:
-
-```bash
-brew install python@3.12
-npm run setup:python-ml
-```
-
-The setup script now prefers `python3.12`, `python3.11`, `python3.10`, and `python3.9` automatically when they are available.
-
-If `.venv-maest` was previously created with Python `3.14`, rerunning `npm run setup:python-ml` now recreates that environment automatically.
+You are likely using an unsupported Python version (common case: Python `3.14`). Use Python `3.9-3.12`.
 
 ### `npm run setup:python-ml` fails with `ResolutionImpossible`
 
-This usually means pip selected an incompatible `tensorflow-decision-forests` release while trying to satisfy `tensorflowjs`.
+Rerun `npm run setup:python-ml`. The script pins a known-good dependency set and repairs old `.venv-maest` environments.
 
-The setup script now pins the compatible combination used by this repo:
+### `npm run convert:maest` fails with protobuf errors from `tensorflow_decision_forests` or `ydf`
 
-- `tensorflow==2.19.0`
-- `tf-keras==2.19.0`
-- `tensorflowjs==4.22.0`
-- `tensorflow-decision-forests==1.12.0`
-
-If you created `.venv-maest` before this fix, rerun `npm run setup:python-ml` and the environment will be updated with the pinned dependency set.
-
-### `npm run convert:maest` fails with a protobuf version error from `tensorflow_decision_forests` or `ydf`
-
-If the traceback mentions a message like `gencode 6.31.1 runtime 5.29.6`, the failure is happening while the generic TensorFlow.js converter bootstraps optional SavedModel support. MAEST frozen-graph conversion does not need that code path.
-
-This repo now uses a dedicated frozen-graph conversion helper that bypasses the eager `tensorflow_decision_forests` import for `npm run convert:maest`. Pull the latest repo changes and rerun:
-
-```bash
-npm run convert:maest -- /path/to/model.pb /path/to/model.json
-```
+Pull latest repo changes and rerun conversion. The repo uses a dedicated frozen-graph helper to avoid the problematic converter import path.
 
 ### I only have an `.onnx` file
 
-That is **not enough** for this app. The renderer expects a **TensorFlow.js graph model** (`model.json` + `group*.bin` shards).
+That is not enough for this app. You need a TensorFlow.js graph export:
 
-### `npm run setup:models` cannot download labels directly
+- `model.json`
+- all referenced `group*.bin` shards
 
-That is okay. The script now falls back to the official metadata and derives `discogs_519labels.txt` from `metadata.json`.
+### The app opens but genre detection is unavailable
 
-### The app opens, but genre detection still says unavailable
-
-That means one or more of these is still missing:
+One or more of these files is still missing:
 
 - `public/models/essentia-wasm.es.js`
 - `public/models/essentia-wasm.module.wasm`
@@ -309,7 +308,7 @@ That means one or more of these is still missing:
 - `public/models/discogs_519labels.txt`
 - `public/models/maest-30s-pw/metadata.json`
 - `public/models/maest-30s-pw/model.json`
-- the required `group*.bin` shards
+- required `group*.bin` shards
 
 Run:
 
@@ -318,18 +317,26 @@ npm run setup:models
 npm run check:models
 ```
 
+### No audio input or microphone error in app
+
+- Check macOS permission: **System Settings -> Privacy & Security -> Microphone**.
+- Make sure the correct input device is selected in the dashboard.
+- Restart the app after granting permission.
+
 ---
 
 ## 11. Useful commands
 
 ```bash
 npm install
-npm run setup:python-ml
 npm run setup:models
 npm run check:models
+npm run setup:python-ml
 npm run convert:maest -- /path/to/model.pb /path/to/model.json
 npm run dev
-npx vite build
+npm run test:bpm
+npm run test:drop
+npm run build
 ```
 
 ---
@@ -339,9 +346,13 @@ npx vite build
 ```text
 electron/main.js
 src/audio/genreDetector.js
-src/audio/genreTaxonomy.js
+src/audio/bpmDetector.js
+src/audio/dropDetector.js
 src/dashboard/Dashboard.jsx
-src/Home.jsx
+src/wizard/SetupWizard.jsx
+src/luagen/generatePlugin.js
+src/luagen/generatePhaserPlugin.js
+src/osc/addressMap.js
 scripts/model-assets.mjs
 scripts/setup-python-ml.mjs
 scripts/convert-maest-frozen-model.mjs
