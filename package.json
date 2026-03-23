@@ -38,7 +38,9 @@
   "build": {
     "appId": "com.jrikner.gma3-disco-pilot",
     "productName": "GMA3 Disco Pilot",
+    "icon": "build/icon.png",
     "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.music",
       "target": "dmg",
       "extendInfo": {
