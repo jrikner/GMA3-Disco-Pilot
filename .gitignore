@@ -1,4 +1,48 @@
-node_modules/
-dist/
-.DS_Store
+# Dependencies
+/node_modules/
+
+# Build and packaging outputs
+/dist/
+/dist-*/
+/release/
+/out/
+/*.dmg
+/*.dmg.blockmap
+/latest-*.yml
+/builder-*.yml
+
+# Generated model/runtime assets (created by setup/convert scripts)
+/public/models/discogs_519labels.txt
+/public/models/essentia-wasm.es.js
+/public/models/essentia-wasm.module.wasm
+/public/models/essentia.js-core.es.js
+/public/models/maest-30s-pw/metadata.json
+/public/models/maest-30s-pw/model.json
+/public/models/maest-30s-pw/group*.bin
+
+# Generated test fixtures
+/test-audio/
+
+# Python virtual environments and bytecode
+/.venv-maest/
+/.venv/
+/venv/
+__pycache__/
+*.py[cod]
+
+# Environment and local overrides
+.env
+.env.*
 *.local
+
+# Logs and caches
+*.log
+.vite/
+.cache/
+.eslintcache
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
