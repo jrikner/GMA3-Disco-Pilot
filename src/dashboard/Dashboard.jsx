@@ -43,6 +43,7 @@ const DROP_CALIBRATION_CUE_PRE_ROLL_SEC = 4
 const DROP_CALIBRATION_CUE_POST_ROLL_SEC = 2
 const AUTO_MIC_RETRY_MS = 2500
 const BPM_HARMONIC_MULTIPLIERS = [0.5, 2 / 3, 0.75, 1, 4 / 3, 1.5, 2]
+const HIPHOP_ALIAS_MULTIPLIERS = [5 / 6, 7 / 8, 8 / 9]
 const BPM_GENRE_MAX_STEP_PER_FRAME = 2
 const EDM_TECHNO_DISAMBIGUATION_MIN_BPM = 126
 const EDM_TECHNO_DISAMBIGUATION_MAX_BPM = 122
@@ -88,13 +89,28 @@ function normalizeBpmByGenre(rawBpm, genre, previousBpm = null) {
   if (!Number.isFinite(rawBpm)) return rawBpm
 
   const [min, max] = BPM_GENRE_RANGES[genre] || BPM_GENRE_RANGES.unknown
-  const candidates = BPM_HARMONIC_MULTIPLIERS
+  const multipliers = genre === 'hiphop'
+    ? [...BPM_HARMONIC_MULTIPLIERS, ...HIPHOP_ALIAS_MULTIPLIERS]
+    : BPM_HARMONIC_MULTIPLIERS
+  const uniqueMultipliers = [...new Set(multipliers)]
+  const candidates = uniqueMultipliers
     .map((multiplier) => rawBpm * multiplier)
     .filter((value) => value >= 60 && value <= 200)
 
   const inRange = candidates.filter((value) => value >= min && value <= max)
   const pool = inRange.length ? inRange : candidates
-  const target = Number.isFinite(previousBpm) ? previousBpm : rawBpm
+  let target = Number.isFinite(previousBpm) ? previousBpm : rawBpm
+
+  // Hip-hop/R&B tracks often show a stable +10-12 BPM alias around 95-105 for
+  // true tempos in the mid-80s. Bias candidate selection toward that pocket.
+  if (
+    genre === 'hiphop'
+    && rawBpm >= 95
+    && rawBpm <= 105
+    && (!Number.isFinite(previousBpm) || previousBpm > 90)
+  ) {
+    target = rawBpm * 0.85
+  }
 
   let best = pool[0] ?? rawBpm
   let bestDelta = Math.abs(best - target)
