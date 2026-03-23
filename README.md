@@ -36,6 +36,13 @@ If these files are missing, the app still opens and BPM works, but **genre detec
 
 ### Download project files (first time)
 
+Pick a root working directory first (example: Desktop):
+
+```bash
+mkdir -p ~/Desktop/Projects
+cd ~/Desktop/Projects
+```
+
 Clone from GitHub:
 
 ```bash
@@ -361,6 +368,8 @@ npm run check:models
 ## 11. Useful commands
 
 ```bash
+mkdir -p ~/Desktop/Projects
+cd ~/Desktop/Projects
 git clone https://github.com/jrikner/GMA3-Disco-Pilot.git
 cd GMA3-Disco-Pilot
 git pull --ff-only
