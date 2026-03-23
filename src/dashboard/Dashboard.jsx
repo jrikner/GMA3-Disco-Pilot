@@ -44,6 +44,13 @@ const DROP_CALIBRATION_CUE_POST_ROLL_SEC = 2
 const AUTO_MIC_RETRY_MS = 2500
 const BPM_HARMONIC_MULTIPLIERS = [0.5, 2 / 3, 0.75, 1, 4 / 3, 1.5, 2]
 const BPM_GENRE_MAX_STEP_PER_FRAME = 2
+const EDM_TECHNO_DISAMBIGUATION_MIN_BPM = 126
+const EDM_TECHNO_DISAMBIGUATION_MAX_BPM = 122
+const EDM_TECHNO_SCORE_RATIO_THRESHOLD = 0.72
+const EDM_TECHNO_REMAP_TO_TECHNO_BPM = 127
+const EDM_TECHNO_REMAP_TO_EDM_BPM = 124
+const EDM_TECHNO_REMAP_STABLE_FRAMES = 20
+const GENRE_FALLBACK_MIN_STABLE_FRAMES = 18
 const BPM_GENRE_RANGES = {
   edm: [110, 145],
   techno: [118, 155],
@@ -111,6 +118,60 @@ function normalizeBpmByGenre(rawBpm, genre, previousBpm = null) {
   }
 
   return Math.round(best)
+}
+
+function resolveAmbiguousGenre(result, bpmHint, previousGenre = null) {
+  const selectedGenre = result?.genre || 'unknown'
+  const entries = Array.isArray(result?.topGenres) ? result.topGenres : []
+  const scoreFor = (genre) => {
+    const entry = entries.find((item) => item?.genre === genre)
+    if (!entry) return 0
+    if (Number.isFinite(entry.weighted)) return entry.weighted
+    if (Number.isFinite(entry.raw)) return entry.raw
+    return 0
+  }
+
+  if (!Number.isFinite(bpmHint)) {
+    return selectedGenre
+  }
+
+  const edmScore = scoreFor('edm')
+  const technoScore = scoreFor('techno')
+  const technoCloseEnough = technoScore > 0 && technoScore >= (edmScore * EDM_TECHNO_SCORE_RATIO_THRESHOLD)
+  const edmCloseEnough = edmScore > 0 && edmScore >= (technoScore * EDM_TECHNO_SCORE_RATIO_THRESHOLD)
+
+  if (
+    selectedGenre === 'edm'
+    && bpmHint >= EDM_TECHNO_DISAMBIGUATION_MIN_BPM
+    && (technoCloseEnough || (previousGenre === 'techno' && technoScore > 0))
+  ) {
+    return 'techno'
+  }
+
+  if (
+    selectedGenre === 'techno'
+    && bpmHint <= EDM_TECHNO_DISAMBIGUATION_MAX_BPM
+    && edmCloseEnough
+  ) {
+    return 'edm'
+  }
+
+  return selectedGenre
+}
+
+function inferFallbackGenreFromBpm(bpm) {
+  if (!Number.isFinite(bpm)) return 'unknown'
+  if (bpm >= 126) return 'techno'
+  if (bpm >= 108 && bpm < 126) return 'edm'
+  if (bpm >= 72 && bpm <= 102) return 'hiphop'
+  return 'unknown'
+}
+
+function inferEdmTechnoRemapGenre(currentGenre, bpm) {
+  if (!Number.isFinite(bpm)) return currentGenre
+  if (currentGenre === 'edm' && bpm >= EDM_TECHNO_REMAP_TO_TECHNO_BPM) return 'techno'
+  if (currentGenre === 'techno' && bpm <= EDM_TECHNO_REMAP_TO_EDM_BPM) return 'edm'
+  return currentGenre
 }
 
 const PHASER_DEFS = [
@@ -187,6 +248,8 @@ export default function Dashboard() {
   const dropCalibrationGateRef = useRef(null)
   const lockedGenreRef = useRef(overrides.lockedGenre)
   const genreAdjustedBpmRef = useRef(null)
+  const fallbackGenreCandidateRef = useRef({ genre: null, count: 0 })
+  const edmTechnoRemapCandidateRef = useRef({ genre: null, count: 0 })
 
   // ── Start / Stop capture ──────────────────────────────────────────────────
 
@@ -651,6 +714,8 @@ export default function Dashboard() {
     startInFlightRef.current = true
     setIsStarting(true)
     genreAdjustedBpmRef.current = null
+    fallbackGenreCandidateRef.current = { genre: null, count: 0 }
+    edmTechnoRemapCandidateRef.current = { genre: null, count: 0 }
     const startToken = ++audioStartTokenRef.current
     try {
       const { audioContext, sourceNode } = await startCapture(deviceId)
@@ -716,6 +781,53 @@ export default function Dashboard() {
           rms: frame.rms,
           isSilent: frame.isSilent,
         })
+        const currentGenre = liveState.genre || 'unknown'
+        if (!lockedGenreRef.current && (currentGenre === 'edm' || currentGenre === 'techno')) {
+          const remapGenre = inferEdmTechnoRemapGenre(currentGenre, frameWithAdjustedBpm.bpm)
+          if (remapGenre !== currentGenre) {
+            if (edmTechnoRemapCandidateRef.current.genre === remapGenre) {
+              edmTechnoRemapCandidateRef.current.count += 1
+            } else {
+              edmTechnoRemapCandidateRef.current = { genre: remapGenre, count: 1 }
+            }
+
+            if (edmTechnoRemapCandidateRef.current.count >= EDM_TECHNO_REMAP_STABLE_FRAMES) {
+              updateLive({
+                genre: remapGenre,
+                genreConfidence: Math.max(0.32, liveState.genreConfidence || 0),
+              })
+              profileMapper.onGenreChange(remapGenre, Math.max(0.32, liveState.genreConfidence || 0))
+              edmTechnoRemapCandidateRef.current = { genre: null, count: 0 }
+            }
+          } else {
+            edmTechnoRemapCandidateRef.current = { genre: null, count: 0 }
+          }
+        } else {
+          edmTechnoRemapCandidateRef.current = { genre: null, count: 0 }
+        }
+
+        if (!lockedGenreRef.current && currentGenre === 'unknown') {
+          const inferredGenre = inferFallbackGenreFromBpm(frameWithAdjustedBpm.bpm)
+          if (inferredGenre !== 'unknown') {
+            if (fallbackGenreCandidateRef.current.genre === inferredGenre) {
+              fallbackGenreCandidateRef.current.count += 1
+            } else {
+              fallbackGenreCandidateRef.current = { genre: inferredGenre, count: 1 }
+            }
+
+            if (fallbackGenreCandidateRef.current.count >= GENRE_FALLBACK_MIN_STABLE_FRAMES) {
+              updateLive({
+                genre: inferredGenre,
+                genreConfidence: 0.25,
+              })
+              profileMapper.onGenreChange(inferredGenre, 0.25)
+            }
+          } else {
+            fallbackGenreCandidateRef.current = { genre: null, count: 0 }
+          }
+        } else {
+          fallbackGenreCandidateRef.current = { genre: null, count: 0 }
+        }
         setGenreRealtimeHint({
           bpm: frameWithAdjustedBpm.bpm ?? 0,
           centroid: frame.spectralCentroid ?? 0,
@@ -735,14 +847,21 @@ export default function Dashboard() {
         if (startToken !== audioStartTokenRef.current) return
         if (dropCalibrationRunningRef.current) return
         if (holdFreezeRef.current) return
+        const liveState = useStore.getState().live || {}
+        const bpmHint = Number.isFinite(liveState.bpm) ? liveState.bpm : genreAdjustedBpmRef.current
+        const resolvedGenre = resolveAmbiguousGenre(result, bpmHint, liveState.genre)
+        const resolvedConfidence = (result.topGenres || [])
+          .find((entry) => entry?.genre === resolvedGenre)?.raw
+          ?? result.rawConfidence
+          ?? result.confidence
         const topGenres = (result.topGenres || []).slice(0, 3)
 
         updateLive({
-          genre: result.genre,
-          genreConfidence: result.rawConfidence ?? result.confidence,
+          genre: resolvedGenre,
+          genreConfidence: resolvedConfidence,
           topGenres,
         })
-        profileMapper.onGenreChange(result.genre, result.rawConfidence ?? result.confidence)
+        profileMapper.onGenreChange(resolvedGenre, resolvedConfidence)
       })
 
       if (genreProcessor) {
@@ -800,6 +919,8 @@ export default function Dashboard() {
     clearAutoStartRetry()
     stopAutoGainLoop()
     genreAdjustedBpmRef.current = null
+    fallbackGenreCandidateRef.current = { genre: null, count: 0 }
+    edmTechnoRemapCandidateRef.current = { genre: null, count: 0 }
     genreProcessorRef.current = null
     if (!dropCalibrationResolvedRef.current) {
       dropCalibrationRanRef.current = false
