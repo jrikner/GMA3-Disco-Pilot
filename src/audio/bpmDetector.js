@@ -64,6 +64,9 @@ const BPM_OUTPUT_MAX_STEP_TRACKING = 2.2
 const BPM_OUTPUT_MAX_STEP_UNLOCKED = 5
 const BPM_OUTLIER_DELTA_LOCKED = 10
 const BPM_OUTLIER_ACCEPT_FRAMES = 16
+const BPM_ANALYSIS_RESET_INTERVAL_MS = 60000
+const BPM_ANALYSIS_WARMUP_MS = 12000
+const BPM_ANALYSIS_MIN_ONSETS = 6
 const FEATURE_EXTRACTORS = ['rms', 'energy', 'spectralCentroid', 'zcr', 'amplitudeSpectrum']
 const BPM_BUFFER_WORKLET_URL = getAppAssetUrl('worklets/bpm-buffer-processor.js')
 
@@ -87,6 +90,7 @@ let fluxHistory = []                 // recent onset-strength values for adaptiv
 const SILENCE_FRAMES_THRESHOLD = 30 // ~3 seconds of silence
 let stabilizedOutputBpm = 120
 let lockedOutlierFrames = 0
+let analysisWindowStartedAt = 0
 
 let callback = null
 let processorNode = null
@@ -123,6 +127,7 @@ export async function startBPMDetector(audioContext, sourceNode, cb) {
   pendingSamples = []
   stabilizedOutputBpm = 120
   lockedOutlierFrames = 0
+  analysisWindowStartedAt = 0
   currentSampleRate = audioContext?.sampleRate || DEFAULT_SAMPLE_RATE
 
   Meyda.bufferSize = BUFFER_SIZE
@@ -201,9 +206,27 @@ export function stopBPMDetector() {
   pendingSamples = []
   stabilizedOutputBpm = 120
   lockedOutlierFrames = 0
+  analysisWindowStartedAt = 0
   connectedSourceNode = null
   currentSampleRate = DEFAULT_SAMPLE_RATE
   callback = null
+}
+
+function resetAnalysisWindow(now) {
+  const heldBpm = Math.round(Math.min(MAX_BPM, Math.max(MIN_BPM, stabilizedOutputBpm || 120)))
+  onsetHistory = []
+  onsetEnergies = []
+  envelopeHistory = []
+  fluxHistory = []
+  bpmMedianHistory = [heldBpm]
+  previousAmplitudeSpectrum = null
+  lastOnsetTime = now
+  lastTempoEstimate = now
+  lastEnvelopeBpm = heldBpm
+  smoothedBpm = heldBpm
+  stabilizedOutputBpm = heldBpm
+  lockedOutlierFrames = 0
+  analysisWindowStartedAt = now
 }
 
 function processChunk(chunk) {
@@ -298,6 +321,13 @@ function handleFrame(features, frameSamples = null) {
 
   const { rms, spectralCentroid, zcr, amplitudeSpectrum } = features
   const now = performance.now()
+  if (!analysisWindowStartedAt) {
+    analysisWindowStartedAt = now
+  } else if ((now - analysisWindowStartedAt) >= BPM_ANALYSIS_RESET_INTERVAL_MS) {
+    // Refresh long-running analysis state periodically to avoid drift,
+    // but keep the currently displayed BPM until the new window is ready.
+    resetAnalysisWindow(now)
+  }
   const flux = computeSpectralFlux(amplitudeSpectrum)
   const { peakAbs, clipRatio } = computeLevelDiagnostics(frameSamples)
 
@@ -409,46 +439,59 @@ function handleFrame(features, frameSamples = null) {
 
   const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
   const tempoLocked = !isSilent && beatLockStrength > 0.62 && onsetHistory.length >= 8
+  const analysisWindowReady = (now - analysisWindowStartedAt) >= BPM_ANALYSIS_WARMUP_MS
+    && onsetHistory.length >= BPM_ANALYSIS_MIN_ONSETS
 
-  // Normalize the final candidate to the currently displayed tempo, then apply
-  // outlier rejection + slew limits to prevent large harmonic hops (e.g. 79↔150)
-  // during otherwise locked steady playback.
-  let stabilizedCandidate = normalizeBpmToReference(
-    finalBpm,
-    stabilizedOutputBpm,
-    MIN_BPM,
-    MAX_BPM,
-    { allowTriplets: tempoLocked || beatLockStrength > 0.65 },
-  )
-  const deltaToAnchor = stabilizedCandidate - stabilizedOutputBpm
+  let outputBpm = Math.round(stabilizedOutputBpm)
+  if (analysisWindowReady) {
+    // Normalize the final candidate to the currently displayed tempo, then apply
+    // outlier rejection + slew limits to prevent large harmonic hops (e.g. 79↔150)
+    // during otherwise locked steady playback.
+    let stabilizedCandidate = normalizeBpmToReference(
+      finalBpm,
+      stabilizedOutputBpm,
+      MIN_BPM,
+      MAX_BPM,
+      { allowTriplets: tempoLocked || beatLockStrength > 0.65 },
+    )
+    const deltaToAnchor = stabilizedCandidate - stabilizedOutputBpm
 
-  if (tempoLocked && Math.abs(deltaToAnchor) > BPM_OUTLIER_DELTA_LOCKED) {
-    lockedOutlierFrames++
-    if (lockedOutlierFrames < BPM_OUTLIER_ACCEPT_FRAMES) {
-      stabilizedCandidate = stabilizedOutputBpm
+    if (tempoLocked && Math.abs(deltaToAnchor) > BPM_OUTLIER_DELTA_LOCKED) {
+      lockedOutlierFrames++
+      if (lockedOutlierFrames < BPM_OUTLIER_ACCEPT_FRAMES) {
+        stabilizedCandidate = stabilizedOutputBpm
+      }
+    } else {
+      lockedOutlierFrames = 0
     }
+
+    const maxStep = tempoLocked
+      ? BPM_OUTPUT_MAX_STEP_LOCKED
+      : beatLockStrength > 0.45
+        ? BPM_OUTPUT_MAX_STEP_TRACKING
+        : BPM_OUTPUT_MAX_STEP_UNLOCKED
+
+    const boundedStep = Math.max(
+      -maxStep,
+      Math.min(maxStep, stabilizedCandidate - stabilizedOutputBpm),
+    )
+    stabilizedOutputBpm = Math.min(
+      MAX_BPM,
+      Math.max(MIN_BPM, stabilizedOutputBpm + boundedStep),
+    )
+    outputBpm = Math.round(stabilizedOutputBpm)
   } else {
     lockedOutlierFrames = 0
   }
 
-  const maxStep = tempoLocked
-    ? BPM_OUTPUT_MAX_STEP_LOCKED
-    : beatLockStrength > 0.45
-      ? BPM_OUTPUT_MAX_STEP_TRACKING
-      : BPM_OUTPUT_MAX_STEP_UNLOCKED
-
-  const boundedStep = Math.max(
-    -maxStep,
-    Math.min(maxStep, stabilizedCandidate - stabilizedOutputBpm),
-  )
-  stabilizedOutputBpm = Math.min(
-    MAX_BPM,
-    Math.max(MIN_BPM, stabilizedOutputBpm + boundedStep),
-  )
-  const outputBpm = Math.round(stabilizedOutputBpm)
-
-  smoothedBpm = normalizeBpmToReference(smoothedBpm, stabilizedOutputBpm, MIN_BPM, MAX_BPM)
-  lastEnvelopeBpm = normalizeBpmToReference(lastEnvelopeBpm, stabilizedOutputBpm, MIN_BPM, MAX_BPM)
+  const normalizedSmoothed = normalizeBpmToReference(smoothedBpm, stabilizedOutputBpm, MIN_BPM, MAX_BPM)
+  if (Number.isFinite(normalizedSmoothed)) {
+    smoothedBpm = normalizedSmoothed
+  }
+  const normalizedEnvelope = normalizeBpmToReference(lastEnvelopeBpm, stabilizedOutputBpm, MIN_BPM, MAX_BPM)
+  if (Number.isFinite(normalizedEnvelope)) {
+    lastEnvelopeBpm = normalizedEnvelope
+  }
 
   callback?.({
     bpm: outputBpm,
