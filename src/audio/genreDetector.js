@@ -11,6 +11,7 @@ const MODEL_HOP_SIZE = 256
 const MAEST_PATCH_FRAMES = 1876
 const MAEST_BANDS = 96
 const ANALYSIS_CHUNK_SIZE = 4096
+const PATCH_COOPERATIVE_YIELD_MS = 12
 const HYSTERESIS_WINDOWS = 2
 const SCORE_SMOOTHING_ALPHA = 0.35
 const CONTEXT_BOOST = 1.2
@@ -38,8 +39,12 @@ let graphModel = null
 let modelLabels = []
 let modelInputName = 'melspectrogram'
 let modelOutputName = null
+let modelBackend = 'unknown'
 let currentSampleRate = 44100
-let audioBuffer = []
+let audioRingBuffer = null
+let audioRingCapacity = 0
+let audioRingWriteIndex = 0
+let audioRingLength = 0
 let analysisInterval = null
 let isAnalysisRunning = false
 let currentGenre = 'unknown'
@@ -51,6 +56,24 @@ let processorNode = null
 let processorMessagePort = null
 let loadPromise = null
 const loadedWorkletContexts = new WeakSet()
+
+async function ensureTfBackend() {
+  const preferredBackends = ['webgl', 'cpu']
+
+  for (const backend of preferredBackends) {
+    try {
+      await tf.setBackend(backend)
+      await tf.ready()
+      modelBackend = tf.getBackend() || backend
+      return modelBackend
+    } catch {
+      // Try the next backend.
+    }
+  }
+
+  modelBackend = tf.getBackend() || 'cpu'
+  return modelBackend
+}
 
 
 function normalizeTensorName(name) {
@@ -247,7 +270,13 @@ function selectGenre(scoreMap) {
 }
 
 function resetStreamingState() {
-  audioBuffer = []
+  const minimumCapacity = Math.ceil(currentSampleRate * MODEL_WINDOW_SECONDS)
+  if (!audioRingBuffer || audioRingCapacity !== minimumCapacity) {
+    audioRingBuffer = new Float32Array(minimumCapacity)
+    audioRingCapacity = minimumCapacity
+  }
+  audioRingWriteIndex = 0
+  audioRingLength = 0
   isAnalysisRunning = false
   currentGenre = 'unknown'
   candidateGenre = null
@@ -404,6 +433,18 @@ async function loadModelAssets() {
   }
 }
 
+async function warmupGraphModel() {
+  if (!graphModel) return
+
+  const input = tf.zeros([1, MAEST_PATCH_FRAMES, MAEST_BANDS], 'float32')
+  try {
+    const rawOutput = await runGraphModel(graphModel, { [modelInputName || 'melspectrogram']: input }, modelOutputName)
+    tf.dispose(rawOutput)
+  } finally {
+    input.dispose()
+  }
+}
+
 async function loadDetector() {
   if (graphModel && runtime) return
   if (loadPromise) {
@@ -431,17 +472,19 @@ async function loadDetector() {
         return
       }
 
+      await ensureTfBackend()
       runtime = await resolveRuntime()
       const assets = await loadModelAssets()
       graphModel = assets.model
       modelLabels = assets.labels
       modelInputName = assets.modelIo?.inputName || 'melspectrogram'
       modelOutputName = assets.modelIo?.outputName || null
+      await warmupGraphModel()
 
       detectorStatus = {
         mode: 'maest',
         reason: 'ready',
-        detail: `Loaded Essentia preprocessing and Discogs-MAEST (${modelLabels.length} labels; input: ${modelInputName}; output: ${modelOutputName || 'default'}).`,
+        detail: `Loaded Essentia preprocessing and Discogs-MAEST (${modelLabels.length} labels; input: ${modelInputName}; output: ${modelOutputName || 'default'}; backend: ${modelBackend}).`,
       }
     } catch (error) {
       detectorStatus = {
@@ -465,11 +508,39 @@ function safeDelete(value) {
   }
 }
 
-function trimAudioBuffer() {
-  const maxSamples = Math.ceil(currentSampleRate * MODEL_WINDOW_SECONDS)
-  if (audioBuffer.length > maxSamples) {
-    audioBuffer = audioBuffer.slice(audioBuffer.length - maxSamples)
+function appendAudioChunk(chunk) {
+  if (!chunk?.length || !audioRingBuffer || audioRingCapacity <= 0) return
+
+  let offset = 0
+  while (offset < chunk.length) {
+    const writable = Math.min(
+      audioRingCapacity - audioRingWriteIndex,
+      chunk.length - offset,
+    )
+    audioRingBuffer.set(chunk.subarray(offset, offset + writable), audioRingWriteIndex)
+    audioRingWriteIndex = (audioRingWriteIndex + writable) % audioRingCapacity
+    audioRingLength = Math.min(audioRingCapacity, audioRingLength + writable)
+    offset += writable
   }
+}
+
+function getRecentAudioSamples(sampleCount) {
+  if (!audioRingBuffer || sampleCount <= 0) return new Float32Array(0)
+  const actualCount = Math.min(sampleCount, audioRingLength)
+  if (actualCount <= 0) return new Float32Array(0)
+
+  const output = new Float32Array(actualCount)
+  const start = (audioRingWriteIndex - actualCount + audioRingCapacity) % audioRingCapacity
+
+  if (start + actualCount <= audioRingCapacity) {
+    output.set(audioRingBuffer.subarray(start, start + actualCount))
+  } else {
+    const firstLength = audioRingCapacity - start
+    output.set(audioRingBuffer.subarray(start), 0)
+    output.set(audioRingBuffer.subarray(0, actualCount - firstLength), firstLength)
+  }
+
+  return output
 }
 
 function normalizeMonoSamples(samples) {
@@ -524,13 +595,20 @@ function repeatLastFrame(frames, expectedLength) {
   return padded
 }
 
-function extractMaestPatch(samples) {
+function yieldToMainThread() {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 0)
+  })
+}
+
+async function extractMaestPatch(samples) {
   const essentia = runtime?.essentia
   if (!essentia) {
     throw new Error('Essentia runtime is not loaded.')
   }
 
   const frames = []
+  let lastYieldAt = performance.now()
   for (let start = 0; start + MODEL_FRAME_SIZE <= samples.length; start += MODEL_HOP_SIZE) {
     const frame = samples.subarray(start, start + MODEL_FRAME_SIZE)
     let vectorInput = null
@@ -545,6 +623,12 @@ function extractMaestPatch(samples) {
       safeDelete(bands)
       safeDelete(vectorInput)
     }
+
+    // Prevent multi-second main-thread stalls while preparing large MAEST patches.
+    if ((performance.now() - lastYieldAt) >= PATCH_COOPERATIVE_YIELD_MS) {
+      await yieldToMainThread()
+      lastYieldAt = performance.now()
+    }
   }
 
   const preparedFrames = repeatLastFrame(frames, MAEST_PATCH_FRAMES).slice(-MAEST_PATCH_FRAMES)
@@ -554,7 +638,10 @@ function extractMaestPatch(samples) {
 async function predictMaest(samples) {
   const resampled = await resampleAudio(samples, currentSampleRate, MODEL_SAMPLE_RATE)
   const normalized = normalizeMonoSamples(resampled.slice(-MODEL_WINDOW_SAMPLES))
-  const flattenedPatch = extractMaestPatch(normalized)
+  const flattenedPatch = await extractMaestPatch(normalized)
+
+  // Give the UI a chance to paint before model execution.
+  await yieldToMainThread()
 
   const input = tf.tensor(flattenedPatch, [1, MAEST_PATCH_FRAMES, MAEST_BANDS], 'float32')
   const inputName = modelInputName || 'melspectrogram'
@@ -609,13 +696,12 @@ function aggregateDiscogsScores(logits) {
 async function runAnalysis() {
   if (isAnalysisRunning || detectorStatus.reason !== 'ready') return
 
-  const minimumSamples = Math.ceil(currentSampleRate * MODEL_WINDOW_SECONDS)
-  if (audioBuffer.length < minimumSamples) return
+  if (audioRingLength < audioRingCapacity) return
 
   isAnalysisRunning = true
 
   try {
-    const windowSamples = Float32Array.from(audioBuffer.slice(audioBuffer.length - minimumSamples))
+    const windowSamples = getRecentAudioSamples(audioRingCapacity)
     const logits = await predictMaest(windowSamples)
     const aggregatedScores = aggregateDiscogsScores(logits)
     const selection = selectGenre(aggregatedScores)
@@ -709,8 +795,7 @@ export async function startGenreDetector(audioContext, cb) {
 
   processor.port.onmessage = (event) => {
     const chunk = normalizeMonoSamples(new Float32Array(event.data))
-    audioBuffer.push(...chunk)
-    trimAudioBuffer()
+    appendAudioChunk(chunk)
   }
 
   processorNode = processor
