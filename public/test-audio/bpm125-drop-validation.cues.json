@@ -1,0 +1,35 @@
+{
+  "generatedAt": "2026-03-22T22:19:30.454Z",
+  "bpm": 125,
+  "sampleRate": 44100,
+  "durationSec": 52,
+  "files": {
+    "steadyControl": "test-audio/bpm125-steady-control.wav",
+    "dropValidation": "test-audio/bpm125-drop-validation.wav"
+  },
+  "dropValidation": {
+    "expectedDropTimesSec": [
+      12,
+      28,
+      44
+    ],
+    "expectedPreDropDipWindowsSec": [
+      {
+        "from": 11.1,
+        "to": 11.8
+      },
+      {
+        "from": 27.1,
+        "to": 27.8
+      },
+      {
+        "from": 43.1,
+        "to": 43.8
+      }
+    ],
+    "notes": [
+      "Track starts with a 4-beat count-in and groove starts around 3.0s.",
+      "Use this track to verify BPM lock near 125 and drop triggers near expected times."
+    ]
+  }
+}

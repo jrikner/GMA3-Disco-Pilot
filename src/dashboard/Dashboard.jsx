@@ -18,6 +18,7 @@ import { initGenreDetector, startGenreDetector, stopGenreDetector, setContextWei
 import * as profileMapper from '../profiles/profileMapper.js'
 import { getProfile, ALL_GENRES, TONIGHT_CONTEXTS } from '../profiles/genreProfiles.js'
 import * as oscClient from '../osc/client.js'
+import { getAppAssetUrl } from '../utils/appAssetUrl.js'
 import styles from './Dashboard.module.css'
 
 const MIN_INPUT_GAIN = 0.25
@@ -33,7 +34,7 @@ const AUTO_GAIN_LOUD_PEAK_P95 = 0.92
 const AUTO_GAIN_LOUD_RMS_P95 = 0.1
 const AUTO_GAIN_MAX_BOOST = 2
 const AUTO_GAIN_TARGET_GAIN_DEFAULT = 1.6
-const DROP_CALIBRATION_AUDIO_PATH = '/Test-audio/bpm125-drop-validation.wav'
+const DROP_CALIBRATION_AUDIO_PATH = getAppAssetUrl('test-audio/bpm125-drop-validation.wav')
 const DROP_CALIBRATION_EXPECTED_CUES_SEC = [12, 28, 44]
 const DROP_CALIBRATION_TIMEOUT_MS = 70000
 const DROP_CALIBRATION_MAX_REASONABLE_MS = 5000
@@ -352,7 +353,11 @@ export default function Dashboard() {
     let calibrationAudio = null
     try {
       try {
-        await fetch(`${DROP_CALIBRATION_AUDIO_PATH}?probe=${Date.now()}`, { method: 'HEAD' })
+        const probe = await fetch(`${DROP_CALIBRATION_AUDIO_PATH}?probe=${Date.now()}`, { method: 'HEAD' })
+        const contentType = probe.headers.get('content-type')?.toLowerCase() || ''
+        if (!probe.ok || !contentType.startsWith('audio/')) {
+          throw new Error('Calibration reference audio is unavailable')
+        }
       } catch {
         // Best-effort probe only; playback below is the source of truth.
       }
