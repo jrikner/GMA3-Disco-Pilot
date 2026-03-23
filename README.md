@@ -34,6 +34,29 @@ If these files are missing, the app still opens and BPM works, but **genre detec
 
 ## 2. Fast install
 
+### Download project files (first time)
+
+Clone from GitHub:
+
+```bash
+git clone https://github.com/jrikner/GMA3-Disco-Pilot.git
+cd GMA3-Disco-Pilot
+```
+
+Alternative:
+
+- Download ZIP from GitHub (`Code -> Download ZIP`), extract it, then open a terminal in the extracted project folder.
+
+### Update project files (if already cloned)
+
+From your local repo folder:
+
+```bash
+git pull --ff-only
+```
+
+### Install and prepare runtime assets
+
 From the repo root:
 
 ```bash
@@ -256,6 +279,16 @@ Run conversion first:
 npm run convert:maest -- /path/to/model.pb /path/to/model.json
 ```
 
+### `git pull` fails because of local changes
+
+Commit or stash your local changes first, then pull again:
+
+```bash
+git add -A
+git commit -m "save local changes"
+git pull --ff-only
+```
+
 ### `npm run convert:maest` fails with `python: command not found` on macOS
 
 Install compatible Python and set up repo venv:
@@ -328,6 +361,9 @@ npm run check:models
 ## 11. Useful commands
 
 ```bash
+git clone https://github.com/jrikner/GMA3-Disco-Pilot.git
+cd GMA3-Disco-Pilot
+git pull --ff-only
 npm install
 npm run setup:models
 npm run check:models
