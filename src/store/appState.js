@@ -119,7 +119,7 @@ const useStore = create((set, get) => ({
   inputGain: 1,
   autoInputGain: true,
   setInputGain: (value) => set({ inputGain: Math.min(8, Math.max(0.25, value)) }),
-  setAutoInputGain: (value) => set({ autoInputGain: value }),
+  setAutoInputGain: (value) => set({ autoInputGain: !!value }),
 
   // ── Session history ──────────────────────────────────────────────────────────
   history: [],  // [{ ts, genre, bpm, confidence }]

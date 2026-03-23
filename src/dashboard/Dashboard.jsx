@@ -20,17 +20,34 @@ import { getProfile, ALL_GENRES, TONIGHT_CONTEXTS } from '../profiles/genreProfi
 import * as oscClient from '../osc/client.js'
 import styles from './Dashboard.module.css'
 
-const AUTO_GAIN_TARGET_RMS = 0.11
-const AUTO_GAIN_MIN_ACTIVE_RMS = 0.012
-const AUTO_GAIN_STABLE_LOW_RMS = 0.08
-const AUTO_GAIN_STABLE_HIGH_RMS = 0.15
-const AUTO_GAIN_ADJUSTMENT_ALPHA = 0.18
-const AUTO_GAIN_STEP_LIMIT = 0.18
 const MIN_INPUT_GAIN = 0.25
 const MAX_INPUT_GAIN = 8
+const AUTO_GAIN_CHECK_INTERVAL_MS = 60000
+const AUTO_GAIN_MEASUREMENT_WINDOW_MS = 10000
+const AUTO_GAIN_SILENT_RMS_THRESHOLD = 0.005
+const AUTO_GAIN_QUIET_RMS_MAX = 0.02
+const AUTO_GAIN_TARGET_RMS = 0.035
+const AUTO_GAIN_MIN_RMS_FOR_TARGET = 0.006
+const AUTO_GAIN_LOUD_CLIP_RATIO_AVG = 0.002
+const AUTO_GAIN_LOUD_PEAK_P95 = 0.985
+const AUTO_GAIN_LOUD_RMS_P95 = 0.16
+const AUTO_GAIN_MAX_BOOST = 2
+const AUTO_GAIN_DEFAULT = 1
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
+}
+
+function mean(values) {
+  if (!values.length) return 0
+  return values.reduce((total, value) => total + value, 0) / values.length
+}
+
+function percentile(values, ratio) {
+  if (!values.length) return 0
+  const sorted = values.slice().sort((a, b) => a - b)
+  const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1))
+  return sorted[index]
 }
 
 const PHASER_DEFS = [
@@ -85,8 +102,15 @@ export default function Dashboard() {
 
   // Panic: house default page/exec inputs
   const [showPanicConfig, setShowPanicConfig] = useState(false)
-  const autoGainCooldownRef = useRef(0)
-  const autoInputGainRef = useRef(autoInputGain)
+  const [autoGainStatus, setAutoGainStatus] = useState('')
+  const holdFreezeRef = useRef(overrides.holdFreeze)
+  const gainSyncImmediateRef = useRef(true)
+  const autoGainLoopIntervalRef = useRef(null)
+  const autoGainMeasurementTimeoutRef = useRef(null)
+  const autoGainCollectingRef = useRef(false)
+  const autoGainSamplesRef = useRef([])
+  const audioStartTokenRef = useRef(0)
+  const startInFlightRef = useRef(false)
 
   // ── Start / Stop capture ──────────────────────────────────────────────────
 
@@ -120,57 +144,155 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    applyInputGain(inputGain, { immediate: true })
+    const immediate = gainSyncImmediateRef.current
+    applyInputGain(inputGain, { immediate })
+    gainSyncImmediateRef.current = true
   }, [inputGain])
 
   useEffect(() => {
-    autoInputGainRef.current = autoInputGain
-    if (!autoInputGain) {
-      autoGainCooldownRef.current = 0
+    holdFreezeRef.current = overrides.holdFreeze
+  }, [overrides.holdFreeze])
+
+  const setDashboardInputGain = useCallback((value, { immediate = true } = {}) => {
+    const clampedGain = clamp(value, MIN_INPUT_GAIN, MAX_INPUT_GAIN)
+    gainSyncImmediateRef.current = immediate
+    setInputGain(clampedGain)
+    return clampedGain
+  }, [setInputGain])
+
+  const stopAutoGainMeasurement = useCallback(() => {
+    if (autoGainMeasurementTimeoutRef.current) {
+      window.clearTimeout(autoGainMeasurementTimeoutRef.current)
+      autoGainMeasurementTimeoutRef.current = null
     }
-  }, [autoInputGain])
+    autoGainCollectingRef.current = false
+    autoGainSamplesRef.current = []
+  }, [])
+
+  const stopAutoGainLoop = useCallback(() => {
+    if (autoGainLoopIntervalRef.current) {
+      window.clearInterval(autoGainLoopIntervalRef.current)
+      autoGainLoopIntervalRef.current = null
+    }
+    stopAutoGainMeasurement()
+  }, [stopAutoGainMeasurement])
+
+  const runAutoGainMeasurement = useCallback(() => {
+    stopAutoGainMeasurement()
+    autoGainCollectingRef.current = true
+    autoGainSamplesRef.current = []
+
+    autoGainMeasurementTimeoutRef.current = window.setTimeout(() => {
+      autoGainMeasurementTimeoutRef.current = null
+      autoGainCollectingRef.current = false
+
+      const samples = autoGainSamplesRef.current.slice()
+      autoGainSamplesRef.current = []
+      if (!samples.length) return
+
+      const rmsValues = samples
+        .map(sample => sample.rms)
+        .filter((value) => Number.isFinite(value))
+      if (!rmsValues.length) return
+
+      const timestamp = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+      const meanRms = mean(rmsValues)
+
+      if (meanRms < AUTO_GAIN_SILENT_RMS_THRESHOLD) {
+        setAutoGainStatus(`${timestamp} Auto gain: pause detected, no change`)
+        return
+      }
+
+      const clipRatios = samples
+        .map(sample => sample.clipRatio)
+        .filter((value) => Number.isFinite(value))
+      const peakValues = samples
+        .map(sample => sample.peakAbs)
+        .filter((value) => Number.isFinite(value))
+
+      const avgClipRatio = mean(clipRatios)
+      const p95PeakAbs = percentile(peakValues, 0.95)
+      const p95Rms = percentile(rmsValues, 0.95)
+
+      if (
+        avgClipRatio >= AUTO_GAIN_LOUD_CLIP_RATIO_AVG
+        || (p95PeakAbs >= AUTO_GAIN_LOUD_PEAK_P95 && p95Rms >= AUTO_GAIN_LOUD_RMS_P95)
+      ) {
+        setDashboardInputGain(AUTO_GAIN_DEFAULT, { immediate: false })
+        setAutoGainStatus(`${timestamp} Auto gain: loud input, reset to 1.00x`)
+        return
+      }
+
+      if (meanRms < AUTO_GAIN_QUIET_RMS_MAX) {
+        const currentGain = getInputGain()
+        const targetGain = clamp(
+          currentGain * (AUTO_GAIN_TARGET_RMS / Math.max(meanRms, AUTO_GAIN_MIN_RMS_FOR_TARGET)),
+          MIN_INPUT_GAIN,
+          AUTO_GAIN_MAX_BOOST,
+        )
+
+        if (targetGain > currentGain + 0.01) {
+          setDashboardInputGain(targetGain, { immediate: false })
+          setAutoGainStatus(`${timestamp} Auto gain: raised to ${targetGain.toFixed(2)}x`)
+        } else {
+          setAutoGainStatus(`${timestamp} Auto gain: quiet input, already near target`)
+        }
+      }
+    }, AUTO_GAIN_MEASUREMENT_WINDOW_MS)
+  }, [setDashboardInputGain, stopAutoGainMeasurement])
+
+  useEffect(() => {
+    if (!live.isCapturing || !autoInputGain) {
+      stopAutoGainLoop()
+      return undefined
+    }
+
+    stopAutoGainLoop()
+    autoGainLoopIntervalRef.current = window.setInterval(
+      runAutoGainMeasurement,
+      AUTO_GAIN_CHECK_INTERVAL_MS,
+    )
+
+    return () => stopAutoGainLoop()
+  }, [autoInputGain, live.isCapturing, runAutoGainMeasurement, stopAutoGainLoop])
 
   async function startAudio(deviceId = audioDeviceId) {
-    if (isStarting) return
+    if (startInFlightRef.current) return
+    startInFlightRef.current = true
     setIsStarting(true)
+    const startToken = ++audioStartTokenRef.current
     try {
       const { audioContext, sourceNode } = await startCapture(deviceId)
+      if (startToken !== audioStartTokenRef.current) {
+        await stopCapture()
+        return
+      }
       const initialGain = getInputGain()
-      setInputGain(initialGain)
+      setDashboardInputGain(initialGain, { immediate: true })
 
       await initGenreDetector(liveContexts)
+      if (startToken !== audioStartTokenRef.current) {
+        stopGenreDetector()
+        await stopCapture()
+        return
+      }
       updateLive({ genreDetectorStatus: getGenreDetectorStatus() })
 
       await startBPMDetector(audioContext, sourceNode, (frame) => {
-        if (overrides.holdFreeze) return
-
-        if (autoInputGainRef.current) {
-          const now = performance.now()
-          const measuredRms = frame.rms ?? 0
-          const needsGainCorrection =
-            measuredRms < AUTO_GAIN_STABLE_LOW_RMS || measuredRms > AUTO_GAIN_STABLE_HIGH_RMS
-
-          if (!frame.isSilent && measuredRms >= AUTO_GAIN_MIN_ACTIVE_RMS && needsGainCorrection && now >= autoGainCooldownRef.current) {
-            const currentGain = getInputGain()
-            const targetGain = clamp(currentGain * (AUTO_GAIN_TARGET_RMS / measuredRms), MIN_INPUT_GAIN, MAX_INPUT_GAIN)
-            const limitedTarget = clamp(
-              targetGain,
-              currentGain * (1 - AUTO_GAIN_STEP_LIMIT),
-              currentGain * (1 + AUTO_GAIN_STEP_LIMIT),
-            )
-            const nextGain = clamp(
-              currentGain + (limitedTarget - currentGain) * AUTO_GAIN_ADJUSTMENT_ALPHA,
-              MIN_INPUT_GAIN,
-              MAX_INPUT_GAIN,
-            )
-
-            if (Math.abs(nextGain - currentGain) >= 0.01) {
-              const appliedGain = applyInputGain(nextGain)
-              setInputGain(appliedGain)
-              autoGainCooldownRef.current = now + 180
-            }
-          }
+        if (startToken !== audioStartTokenRef.current) return
+        if (autoGainCollectingRef.current) {
+          autoGainSamplesRef.current.push({
+            rms: Number.isFinite(frame.rms) ? frame.rms : 0,
+            peakAbs: Number.isFinite(frame.peakAbs) ? frame.peakAbs : 0,
+            clipRatio: Number.isFinite(frame.clipRatio) ? frame.clipRatio : 0,
+          })
         }
+
+        if (holdFreezeRef.current) return
 
         updateLive({
           bpm: frame.bpm,
@@ -187,9 +309,16 @@ export default function Dashboard() {
         })
         profileMapper.onAudioFrame(frame)
       })
+      if (startToken !== audioStartTokenRef.current) {
+        stopBPMDetector()
+        stopGenreDetector()
+        await stopCapture()
+        return
+      }
 
       const genreProcessor = await startGenreDetector(audioContext, (result) => {
-        if (overrides.holdFreeze) return
+        if (startToken !== audioStartTokenRef.current) return
+        if (holdFreezeRef.current) return
         const topGenres = (result.topGenres || []).slice(0, 3)
 
         updateLive({
@@ -203,6 +332,14 @@ export default function Dashboard() {
       if (genreProcessor) {
         sourceNode.connect(genreProcessor)
         genreProcessorRef.current = genreProcessor
+      }
+
+      if (startToken !== audioStartTokenRef.current) {
+        genreProcessorRef.current = null
+        stopBPMDetector()
+        stopGenreDetector()
+        await stopCapture()
+        return
       }
 
       updateLive({
@@ -220,11 +357,15 @@ export default function Dashboard() {
         isCapturing: false,
         audioError: err?.message || 'Unable to start microphone capture.',
       })
+    } finally {
+      startInFlightRef.current = false
+      setIsStarting(false)
     }
-    setIsStarting(false)
   }
 
   async function stopAudio() {
+    audioStartTokenRef.current++
+    stopAutoGainLoop()
     genreProcessorRef.current = null
     stopBPMDetector()
     stopGenreDetector()
@@ -576,15 +717,13 @@ export default function Dashboard() {
               step={0.05}
               value={inputGain}
               onChange={(e) => {
-                const nextGain = Number(e.target.value)
-                const appliedGain = applyInputGain(nextGain, { immediate: true })
-                setInputGain(appliedGain)
+                setDashboardInputGain(Number(e.target.value), { immediate: true })
               }}
             />
             <button
               className={`${styles.autoGainBtn} ${autoInputGain ? styles.autoGainBtnActive : ''}`}
               onClick={() => setAutoInputGain(!autoInputGain)}
-              title="Automatically ride the microphone gain toward a stable detection level."
+              title="Enable automatic 60-second input-gain checks"
             >
               {autoInputGain ? 'Auto On' : 'Auto Off'}
             </button>
@@ -593,6 +732,11 @@ export default function Dashboard() {
             <span>Detection trim</span>
             <span>{gainPercent}% of max</span>
           </div>
+          {autoGainStatus && (
+            <div style={{ marginTop: 6, color: '#556', fontSize: 10, lineHeight: 1.35 }}>
+              {autoGainStatus}
+            </div>
+          )}
         </div>
 
         {/* Audio device picker */}

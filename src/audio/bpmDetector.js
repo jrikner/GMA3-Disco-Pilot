@@ -91,6 +91,10 @@ let connectedSourceNode = null
 const loadedWorkletContexts = new WeakSet()
 
 export async function startBPMDetector(audioContext, sourceNode, cb) {
+  if (!audioContext || audioContext.state === 'closed') {
+    throw new Error('Audio context is unavailable for BPM detector startup.')
+  }
+
   callback = cb
   onsetHistory = []
   onsetEnergies = []
@@ -121,6 +125,10 @@ export async function startBPMDetector(audioContext, sourceNode, cb) {
   if (!loadedWorkletContexts.has(audioContext)) {
     await audioContext.audioWorklet.addModule(BPM_BUFFER_WORKLET_URL)
     loadedWorkletContexts.add(audioContext)
+  }
+
+  if (audioContext.state === 'closed') {
+    throw new Error('Audio context closed before BPM worklet could be created.')
   }
 
   const processor = new AudioWorkletNode(audioContext, 'bpm-buffer-processor', {
@@ -195,7 +203,26 @@ function processChunk(chunk) {
 
     const features = Meyda.extract(FEATURE_EXTRACTORS, frame, previousFrame)
     previousFrame = frame
-    handleFrame(features)
+    handleFrame(features, frame)
+  }
+}
+
+function computeLevelDiagnostics(samples) {
+  if (!samples?.length) {
+    return { peakAbs: 0, clipRatio: 0 }
+  }
+
+  let peakAbs = 0
+  let clippedSamples = 0
+  for (let i = 0; i < samples.length; i++) {
+    const abs = Math.abs(samples[i] || 0)
+    if (abs > peakAbs) peakAbs = abs
+    if (abs >= 0.985) clippedSamples++
+  }
+
+  return {
+    peakAbs,
+    clipRatio: clippedSamples / samples.length,
   }
 }
 
@@ -248,12 +275,13 @@ function computeBandEnergies(amplitudeSpectrum) {
   }
 }
 
-function handleFrame(features) {
+function handleFrame(features, frameSamples = null) {
   if (!features) return
 
   const { rms, spectralCentroid, zcr, amplitudeSpectrum } = features
   const now = performance.now()
   const flux = computeSpectralFlux(amplitudeSpectrum)
+  const { peakAbs, clipRatio } = computeLevelDiagnostics(frameSamples)
 
   // Compute multi-band energies
   const bands = computeBandEnergies(amplitudeSpectrum)
@@ -355,13 +383,23 @@ function handleFrame(features) {
   // Blend: mostly EMA, with median stabilizer
   const finalBpm = Math.round(smoothedBpm * (1 - BPM_MEDIAN_WEIGHT) + medianBpm * BPM_MEDIAN_WEIGHT)
 
+  const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
+  const tempoLocked = !isSilent && beatLockStrength > 0.62 && onsetHistory.length >= 8
+
   callback?.({
     bpm: finalBpm,
     energy: smoothedEnergy,
     spectralCentroid: smoothedCentroid,
     rms: rms || 0,
+    peakAbs,
+    clipRatio,
     zcr: zcr || 0,
     lowBandEnergy: bands.low,
+    isOnset,
+    onsetStrength,
+    onsetThreshold: fluxThreshold,
+    beatLockStrength,
+    tempoLocked,
     isSilent,
   })
 }
