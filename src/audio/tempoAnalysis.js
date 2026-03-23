@@ -9,8 +9,15 @@ export function getMedian(arr) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
-export function normalizeBpmToReference(bpm, referenceBpm, minBpm = DEFAULT_MIN_BPM, maxBpm = DEFAULT_MAX_BPM) {
+export function normalizeBpmToReference(
+  bpm,
+  referenceBpm,
+  minBpm = DEFAULT_MIN_BPM,
+  maxBpm = DEFAULT_MAX_BPM,
+  options = {},
+) {
   if (!Number.isFinite(bpm)) return null
+  const allowTriplets = options.allowTriplets !== false
 
   let candidate = bpm
   while (candidate < minBpm) candidate *= 2
@@ -20,16 +27,47 @@ export function normalizeBpmToReference(bpm, referenceBpm, minBpm = DEFAULT_MIN_
     return Math.min(maxBpm, Math.max(minBpm, candidate))
   }
 
-  const variants = [candidate / 2, candidate, candidate * 2]
-    .filter((v) => v >= minBpm && v <= maxBpm)
+  // Include simple triplet harmonics to correct common 2:3 / 3:2 tempo aliases
+  // (for example, 80↔120 or 160↔120) that show up in live onset tracking.
+  const MIN_HARMONIC_DELTA_GAIN = 16
+  const variants = [
+    { bpm: candidate / 2, multiplier: 0.5 },
+    { bpm: candidate, multiplier: 1 },
+    { bpm: candidate * 2, multiplier: 2 },
+    ...(allowTriplets
+      ? [
+          { bpm: candidate * (2 / 3), multiplier: 2 / 3 },
+          { bpm: candidate * 0.75, multiplier: 0.75 },
+          { bpm: candidate * (4 / 3), multiplier: 4 / 3 },
+          { bpm: candidate * 1.5, multiplier: 1.5 },
+        ]
+      : []),
+  ].filter((entry) => entry.bpm >= minBpm && entry.bpm <= maxBpm)
 
+  const baseDelta = Math.abs(candidate - referenceBpm)
   let best = candidate
-  let bestDelta = Math.abs(candidate - referenceBpm)
+  let bestDelta = baseDelta
+  let bestPenalty = 0
+
   for (const variant of variants) {
-    const delta = Math.abs(variant - referenceBpm)
+    const delta = Math.abs(variant.bpm - referenceBpm)
+    const penalty = Math.abs(Math.log2(variant.multiplier))
+    const harmonicGain = baseDelta - delta
+
+    if (variant.multiplier !== 1 && harmonicGain < MIN_HARMONIC_DELTA_GAIN) {
+      continue
+    }
+
     if (delta < bestDelta) {
-      best = variant
+      best = variant.bpm
       bestDelta = delta
+      bestPenalty = penalty
+      continue
+    }
+
+    if (Math.abs(delta - bestDelta) < 1e-6 && penalty < bestPenalty) {
+      best = variant.bpm
+      bestPenalty = penalty
     }
   }
 

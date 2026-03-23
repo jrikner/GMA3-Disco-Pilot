@@ -39,6 +39,21 @@ const DROP_CALIBRATION_EXPECTED_CUES_SEC = [12, 28, 44]
 const DROP_CALIBRATION_TIMEOUT_MS = 70000
 const DROP_CALIBRATION_MAX_REASONABLE_MS = 5000
 const DROP_CALIBRATION_START_DELAY_MS = 1500
+const DROP_CALIBRATION_CUE_PRE_ROLL_SEC = 4
+const DROP_CALIBRATION_CUE_POST_ROLL_SEC = 2
+const AUTO_MIC_RETRY_MS = 2500
+const BPM_HARMONIC_MULTIPLIERS = [0.5, 2 / 3, 0.75, 1, 4 / 3, 1.5, 2]
+const BPM_GENRE_RANGES = {
+  edm: [110, 145],
+  techno: [118, 155],
+  hiphop: [70, 105],
+  pop: [90, 140],
+  eighties: [90, 135],
+  latin: [85, 135],
+  rock: [85, 155],
+  corporate: [70, 130],
+  unknown: [60, 200],
+}
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
@@ -59,6 +74,35 @@ function percentile(values, ratio) {
 function meanAbsolute(values) {
   if (!values.length) return 0
   return values.reduce((total, value) => total + Math.abs(value), 0) / values.length
+}
+
+function normalizeBpmByGenre(rawBpm, genre, previousBpm = null) {
+  if (!Number.isFinite(rawBpm)) return rawBpm
+
+  const [min, max] = BPM_GENRE_RANGES[genre] || BPM_GENRE_RANGES.unknown
+  const candidates = BPM_HARMONIC_MULTIPLIERS
+    .map((multiplier) => rawBpm * multiplier)
+    .filter((value) => value >= 60 && value <= 200)
+
+  const inRange = candidates.filter((value) => value >= min && value <= max)
+  const pool = inRange.length ? inRange : candidates
+  const target = Number.isFinite(previousBpm) ? previousBpm : rawBpm
+
+  let best = pool[0] ?? rawBpm
+  let bestDelta = Math.abs(best - target)
+  for (let i = 1; i < pool.length; i++) {
+    const candidate = pool[i]
+    const delta = Math.abs(candidate - target)
+    if (delta < bestDelta) {
+      best = candidate
+      bestDelta = delta
+    }
+  }
+
+  if (!inRange.length) {
+    return Math.round(clamp(best, min, max))
+  }
+  return Math.round(best)
 }
 
 const PHASER_DEFS = [
@@ -129,6 +173,12 @@ export default function Dashboard() {
   const dropSessionOffsetRef = useRef(0)
   const audioStartTokenRef = useRef(0)
   const startInFlightRef = useRef(false)
+  const shouldAutoStartRef = useRef(true)
+  const autoStartRetryTimeoutRef = useRef(null)
+  const dropCalibrationRunningRef = useRef(false)
+  const dropCalibrationGateRef = useRef(null)
+  const lockedGenreRef = useRef(overrides.lockedGenre)
+  const genreAdjustedBpmRef = useRef(null)
 
   // ── Start / Stop capture ──────────────────────────────────────────────────
 
@@ -160,10 +210,42 @@ export default function Dashboard() {
     }
   }
 
+  function clearAutoStartRetry() {
+    if (autoStartRetryTimeoutRef.current) {
+      window.clearTimeout(autoStartRetryTimeoutRef.current)
+      autoStartRetryTimeoutRef.current = null
+    }
+  }
+
+  function scheduleAutoStartRetry(deviceId = audioDeviceId) {
+    if (!shouldAutoStartRef.current) return
+    const currentlyCapturing = useStore.getState().live?.isCapturing
+    if (currentlyCapturing || startInFlightRef.current) return
+    if (autoStartRetryTimeoutRef.current) return
+
+    autoStartRetryTimeoutRef.current = window.setTimeout(() => {
+      autoStartRetryTimeoutRef.current = null
+      const capturingNow = useStore.getState().live?.isCapturing
+      if (!shouldAutoStartRef.current || capturingNow || startInFlightRef.current) return
+      startAudio(deviceId)
+    }, AUTO_MIC_RETRY_MS)
+  }
+
   useEffect(() => {
+    shouldAutoStartRef.current = true
     startAudio()
-    return () => stopAudio()
+    return () => {
+      shouldAutoStartRef.current = false
+      clearAutoStartRetry()
+      stopAudio()
+    }
   }, [])
+
+  useEffect(() => {
+    if (!shouldAutoStartRef.current) return
+    if (live.isCapturing || startInFlightRef.current) return
+    scheduleAutoStartRetry(audioDeviceId)
+  }, [audioDeviceId, live.isCapturing])
 
   useEffect(() => {
     const immediate = gainSyncImmediateRef.current
@@ -174,6 +256,39 @@ export default function Dashboard() {
   useEffect(() => {
     holdFreezeRef.current = overrides.holdFreeze
   }, [overrides.holdFreeze])
+
+  useEffect(() => {
+    lockedGenreRef.current = overrides.lockedGenre
+  }, [overrides.lockedGenre])
+
+  useEffect(() => {
+    dropCalibrationRunningRef.current = dropCalibrationRunning
+  }, [dropCalibrationRunning])
+
+  const shouldSuppressInputForCalibration = useCallback((nowMs = Date.now()) => {
+    if (!dropCalibrationRunningRef.current) return false
+
+    const gate = dropCalibrationGateRef.current
+    if (!gate || !Number.isFinite(gate.playbackStartMs)) {
+      return true
+    }
+
+    const elapsedSec = (nowMs - gate.playbackStartMs) / 1000
+    const cuesSec = Array.isArray(gate.cuesSec) && gate.cuesSec.length
+      ? gate.cuesSec
+      : DROP_CALIBRATION_EXPECTED_CUES_SEC
+    const preRollSec = Number.isFinite(gate.preRollSec)
+      ? gate.preRollSec
+      : DROP_CALIBRATION_CUE_PRE_ROLL_SEC
+    const postRollSec = Number.isFinite(gate.postRollSec)
+      ? gate.postRollSec
+      : DROP_CALIBRATION_CUE_POST_ROLL_SEC
+
+    const inCueWindow = cuesSec.some(
+      (cueSec) => elapsedSec >= cueSec - preRollSec && elapsedSec <= cueSec + postRollSec,
+    )
+    return !inCueWindow
+  }, [])
 
   const setDashboardInputGain = useCallback((
     value,
@@ -341,7 +456,14 @@ export default function Dashboard() {
       return
     }
 
+    dropCalibrationRunningRef.current = true
     setDropCalibrationRunning(true)
+    dropCalibrationGateRef.current = {
+      playbackStartMs: null,
+      cuesSec: DROP_CALIBRATION_EXPECTED_CUES_SEC.slice(),
+      preRollSec: DROP_CALIBRATION_CUE_PRE_ROLL_SEC,
+      postRollSec: DROP_CALIBRATION_CUE_POST_ROLL_SEC,
+    }
     const timestamp = new Date().toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
@@ -372,7 +494,7 @@ export default function Dashboard() {
       calibrationAudio = new Audio(`${DROP_CALIBRATION_AUDIO_PATH}?cal=${Date.now()}`)
       calibrationAudio.preload = 'auto'
 
-      const playbackStartMs = Date.now()
+      let playbackStartMs = null
       const playbackDone = new Promise((resolve, reject) => {
         let finished = false
         const finish = (fn, value) => {
@@ -397,6 +519,11 @@ export default function Dashboard() {
       })
 
       await calibrationAudio.play()
+      playbackStartMs = Date.now()
+      dropCalibrationGateRef.current = {
+        ...(dropCalibrationGateRef.current || {}),
+        playbackStartMs,
+      }
       await playbackDone
       await new Promise((resolve) => window.setTimeout(resolve, 450))
 
@@ -463,12 +590,14 @@ export default function Dashboard() {
       if (calibrationAudio) {
         calibrationAudio.pause()
       }
+      dropCalibrationGateRef.current = null
       profileMapper.setDropTriggerSuppressed(false)
       if (previousLockedGenre) {
         setLockedGenre(previousLockedGenre)
       } else {
         clearLockedGenre()
       }
+      dropCalibrationRunningRef.current = false
       setDropCalibrationRunning(false)
     }
   }, [
@@ -505,10 +634,15 @@ export default function Dashboard() {
     return () => window.clearTimeout(timer)
   }, [live.isCapturing, runDropCalibration])
 
-  async function startAudio(deviceId = audioDeviceId) {
+  async function startAudio(deviceId = audioDeviceId, { userInitiated = false } = {}) {
+    if (userInitiated) {
+      shouldAutoStartRef.current = true
+    }
     if (startInFlightRef.current) return
+    clearAutoStartRetry()
     startInFlightRef.current = true
     setIsStarting(true)
+    genreAdjustedBpmRef.current = null
     const startToken = ++audioStartTokenRef.current
     try {
       const { audioContext, sourceNode } = await startCapture(deviceId)
@@ -542,7 +676,22 @@ export default function Dashboard() {
 
       await startBPMDetector(audioContext, sourceNode, (frame) => {
         if (startToken !== audioStartTokenRef.current) return
-        if (autoGainCollectingRef.current) {
+        if (shouldSuppressInputForCalibration()) return
+        const liveState = useStore.getState().live || {}
+        const effectiveGenre = lockedGenreRef.current || liveState.genre || 'unknown'
+        const adjustedBpm = normalizeBpmByGenre(
+          frame.bpm,
+          effectiveGenre,
+          genreAdjustedBpmRef.current,
+        )
+        if (Number.isFinite(adjustedBpm)) {
+          genreAdjustedBpmRef.current = adjustedBpm
+        }
+        const frameWithAdjustedBpm = {
+          ...frame,
+          bpm: Number.isFinite(adjustedBpm) ? adjustedBpm : frame.bpm,
+        }
+        if (autoGainCollectingRef.current && !dropCalibrationRunningRef.current) {
           autoGainSamplesRef.current.push({
             rms: Number.isFinite(frame.rms) ? frame.rms : 0,
             peakAbs: Number.isFinite(frame.peakAbs) ? frame.peakAbs : 0,
@@ -553,19 +702,19 @@ export default function Dashboard() {
         if (holdFreezeRef.current) return
 
         updateLive({
-          bpm: frame.bpm,
+          bpm: frameWithAdjustedBpm.bpm,
           energy: frame.energy,
           spectralCentroid: frame.spectralCentroid,
           rms: frame.rms,
           isSilent: frame.isSilent,
         })
         setGenreRealtimeHint({
-          bpm: frame.bpm ?? 0,
+          bpm: frameWithAdjustedBpm.bpm ?? 0,
           centroid: frame.spectralCentroid ?? 0,
           energy: frame.energy ?? 0,
           lowBandEnergy: frame.lowBandEnergy ?? 0,
         })
-        profileMapper.onAudioFrame(frame)
+        profileMapper.onAudioFrame(frameWithAdjustedBpm)
       })
       if (startToken !== audioStartTokenRef.current) {
         stopBPMDetector()
@@ -576,6 +725,7 @@ export default function Dashboard() {
 
       const genreProcessor = await startGenreDetector(audioContext, (result) => {
         if (startToken !== audioStartTokenRef.current) return
+        if (dropCalibrationRunningRef.current) return
         if (holdFreezeRef.current) return
         const topGenres = (result.topGenres || []).slice(0, 3)
 
@@ -605,6 +755,7 @@ export default function Dashboard() {
         audioError: null,
         genreDetectorStatus: getGenreDetectorStatus(),
       })
+      clearAutoStartRetry()
     } catch (err) {
       if (startToken !== audioStartTokenRef.current) {
         return
@@ -618,15 +769,29 @@ export default function Dashboard() {
         isCapturing: false,
         audioError: err?.message || 'Unable to start microphone capture.',
       })
+
+      const message = `${err?.name || ''} ${err?.message || ''}`
+      const permissionDenied = /denied|notallowederror|permission/i.test(message)
+      if (shouldAutoStartRef.current && !permissionDenied) {
+        scheduleAutoStartRetry(deviceId)
+      }
     } finally {
       startInFlightRef.current = false
       setIsStarting(false)
+      if (shouldAutoStartRef.current && !useStore.getState().live?.isCapturing) {
+        scheduleAutoStartRetry(deviceId)
+      }
     }
   }
 
-  async function stopAudio() {
+  async function stopAudio({ userInitiated = false } = {}) {
+    if (userInitiated) {
+      shouldAutoStartRef.current = false
+    }
     audioStartTokenRef.current++
+    clearAutoStartRetry()
     stopAutoGainLoop()
+    genreAdjustedBpmRef.current = null
     genreProcessorRef.current = null
     if (!dropCalibrationResolvedRef.current) {
       dropCalibrationRanRef.current = false
@@ -1126,7 +1291,9 @@ export default function Dashboard() {
 
           <button
             className={`${styles.overrideBtn} ${live.isCapturing ? styles.active : ''}`}
-            onClick={() => live.isCapturing ? stopAudio() : startAudio()}
+            onClick={() => live.isCapturing
+              ? stopAudio({ userInitiated: true })
+              : startAudio(audioDeviceId, { userInitiated: true })}
           >
             <div className={styles.overrideBtnLabel}>Microphone</div>
             <div className={styles.overrideBtnValue}>

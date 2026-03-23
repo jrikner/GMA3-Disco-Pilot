@@ -165,7 +165,7 @@ export function onAudioFrame({
   if (isSilent) {
     const payload = {
       nowMs: Date.now(),
-      genre: activeGenre || lockedGenre || 'unknown',
+      genre: lockedGenre ?? activeGenre ?? 'unknown',
       reset: true,
       reason: 'silence',
     }
@@ -177,7 +177,7 @@ export function onAudioFrame({
 
   const effectiveBpm = manualBpm ?? bpm
   const now = Date.now() - dropTimingOffsetMs
-  const effectiveGenre = activeGenre || lockedGenre || 'unknown'
+  const effectiveGenre = lockedGenre ?? activeGenre ?? 'unknown'
 
   if (DROP_ENABLED_GENRES.has(effectiveGenre)) {
     let dropResult = {

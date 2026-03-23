@@ -59,6 +59,11 @@ const BPM_CLUSTER_RADIUS = 2  // Group BPM candidates within ±2 BPM
 // Median filter for BPM stability
 const MEDIAN_HISTORY_SIZE = 7
 const BPM_MEDIAN_WEIGHT = 0.3  // Blend median estimate into final output
+const BPM_OUTPUT_MAX_STEP_LOCKED = 0.6
+const BPM_OUTPUT_MAX_STEP_TRACKING = 2.2
+const BPM_OUTPUT_MAX_STEP_UNLOCKED = 5
+const BPM_OUTLIER_DELTA_LOCKED = 10
+const BPM_OUTLIER_ACCEPT_FRAMES = 16
 const FEATURE_EXTRACTORS = ['rms', 'energy', 'spectralCentroid', 'zcr', 'amplitudeSpectrum']
 const BPM_BUFFER_WORKLET_URL = getAppAssetUrl('worklets/bpm-buffer-processor.js')
 
@@ -80,6 +85,8 @@ let bpmMedianHistory = []           // Recent BPM estimates for median filtering
 let previousAmplitudeSpectrum = null // Prior spectrum for manual spectral flux calculation
 let fluxHistory = []                 // recent onset-strength values for adaptive thresholding
 const SILENCE_FRAMES_THRESHOLD = 30 // ~3 seconds of silence
+let stabilizedOutputBpm = 120
+let lockedOutlierFrames = 0
 
 let callback = null
 let processorNode = null
@@ -114,6 +121,8 @@ export async function startBPMDetector(audioContext, sourceNode, cb) {
   fluxHistory = []
   previousFrame = null
   pendingSamples = []
+  stabilizedOutputBpm = 120
+  lockedOutlierFrames = 0
   currentSampleRate = audioContext?.sampleRate || DEFAULT_SAMPLE_RATE
 
   Meyda.bufferSize = BUFFER_SIZE
@@ -190,6 +199,8 @@ export function stopBPMDetector() {
   fluxHistory = []
   previousFrame = null
   pendingSamples = []
+  stabilizedOutputBpm = 120
+  lockedOutlierFrames = 0
   connectedSourceNode = null
   currentSampleRate = DEFAULT_SAMPLE_RATE
   callback = null
@@ -399,8 +410,48 @@ function handleFrame(features, frameSamples = null) {
   const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
   const tempoLocked = !isSilent && beatLockStrength > 0.62 && onsetHistory.length >= 8
 
+  // Normalize the final candidate to the currently displayed tempo, then apply
+  // outlier rejection + slew limits to prevent large harmonic hops (e.g. 79↔150)
+  // during otherwise locked steady playback.
+  let stabilizedCandidate = normalizeBpmToReference(
+    finalBpm,
+    stabilizedOutputBpm,
+    MIN_BPM,
+    MAX_BPM,
+    { allowTriplets: tempoLocked || beatLockStrength > 0.65 },
+  )
+  const deltaToAnchor = stabilizedCandidate - stabilizedOutputBpm
+
+  if (tempoLocked && Math.abs(deltaToAnchor) > BPM_OUTLIER_DELTA_LOCKED) {
+    lockedOutlierFrames++
+    if (lockedOutlierFrames < BPM_OUTLIER_ACCEPT_FRAMES) {
+      stabilizedCandidate = stabilizedOutputBpm
+    }
+  } else {
+    lockedOutlierFrames = 0
+  }
+
+  const maxStep = tempoLocked
+    ? BPM_OUTPUT_MAX_STEP_LOCKED
+    : beatLockStrength > 0.45
+      ? BPM_OUTPUT_MAX_STEP_TRACKING
+      : BPM_OUTPUT_MAX_STEP_UNLOCKED
+
+  const boundedStep = Math.max(
+    -maxStep,
+    Math.min(maxStep, stabilizedCandidate - stabilizedOutputBpm),
+  )
+  stabilizedOutputBpm = Math.min(
+    MAX_BPM,
+    Math.max(MIN_BPM, stabilizedOutputBpm + boundedStep),
+  )
+  const outputBpm = Math.round(stabilizedOutputBpm)
+
+  smoothedBpm = normalizeBpmToReference(smoothedBpm, stabilizedOutputBpm, MIN_BPM, MAX_BPM)
+  lastEnvelopeBpm = normalizeBpmToReference(lastEnvelopeBpm, stabilizedOutputBpm, MIN_BPM, MAX_BPM)
+
   callback?.({
-    bpm: finalBpm,
+    bpm: outputBpm,
     energy: smoothedEnergy,
     spectralCentroid: smoothedCentroid,
     rms: rms || 0,
