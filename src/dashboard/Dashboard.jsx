@@ -48,9 +48,15 @@ const BPM_GENRE_MAX_STEP_PER_FRAME = 2
 const EDM_TECHNO_DISAMBIGUATION_MIN_BPM = 126
 const EDM_TECHNO_DISAMBIGUATION_MAX_BPM = 122
 const EDM_TECHNO_SCORE_RATIO_THRESHOLD = 0.72
+const HIPHOP_DISAMBIGUATION_MAX_BPM = 102
+const HIPHOP_DISAMBIGUATION_SCORE_RATIO_THRESHOLD = 0.62
 const EDM_TECHNO_REMAP_TO_TECHNO_BPM = 127
 const EDM_TECHNO_REMAP_TO_EDM_BPM = 124
 const EDM_TECHNO_REMAP_STABLE_FRAMES = 20
+const HIPHOP_AUTO_REMAP_MIN_BPM = 74
+const HIPHOP_AUTO_REMAP_MAX_BPM = 102
+const HIPHOP_AUTO_REMAP_SCORE_FLOOR = 0.1
+const HIPHOP_AUTO_REMAP_STABLE_FRAMES = 24
 const GENRE_FALLBACK_MIN_STABLE_FRAMES = 18
 const BPM_GENRE_RANGES = {
   edm: [110, 145],
@@ -153,8 +159,19 @@ function resolveAmbiguousGenre(result, bpmHint, previousGenre = null) {
 
   const edmScore = scoreFor('edm')
   const technoScore = scoreFor('techno')
+  const hiphopScore = scoreFor('hiphop')
   const technoCloseEnough = technoScore > 0 && technoScore >= (edmScore * EDM_TECHNO_SCORE_RATIO_THRESHOLD)
   const edmCloseEnough = edmScore > 0 && edmScore >= (technoScore * EDM_TECHNO_SCORE_RATIO_THRESHOLD)
+  const topScore = Math.max(edmScore, technoScore, hiphopScore, 0)
+  const hiphopCloseEnough = hiphopScore > 0 && hiphopScore >= (topScore * HIPHOP_DISAMBIGUATION_SCORE_RATIO_THRESHOLD)
+
+  if (
+    (selectedGenre === 'edm' || selectedGenre === 'techno')
+    && bpmHint <= HIPHOP_DISAMBIGUATION_MAX_BPM
+    && (hiphopCloseEnough || (previousGenre === 'hiphop' && hiphopScore > 0))
+  ) {
+    return 'hiphop'
+  }
 
   if (
     selectedGenre === 'edm'
@@ -188,6 +205,15 @@ function inferEdmTechnoRemapGenre(currentGenre, bpm) {
   if (currentGenre === 'edm' && bpm >= EDM_TECHNO_REMAP_TO_TECHNO_BPM) return 'techno'
   if (currentGenre === 'techno' && bpm <= EDM_TECHNO_REMAP_TO_EDM_BPM) return 'edm'
   return currentGenre
+}
+
+function getTopGenreScore(topGenres, genre) {
+  if (!Array.isArray(topGenres) || !genre) return 0
+  const match = topGenres.find((entry) => entry?.genre === genre)
+  if (!match) return 0
+  if (Number.isFinite(match.raw)) return match.raw
+  if (Number.isFinite(match.weighted)) return match.weighted
+  return 0
 }
 
 const PHASER_DEFS = [
@@ -266,6 +292,7 @@ export default function Dashboard() {
   const genreAdjustedBpmRef = useRef(null)
   const fallbackGenreCandidateRef = useRef({ genre: null, count: 0 })
   const edmTechnoRemapCandidateRef = useRef({ genre: null, count: 0 })
+  const hiphopRemapCandidateRef = useRef({ genre: null, count: 0 })
 
   // ── Start / Stop capture ──────────────────────────────────────────────────
 
@@ -732,6 +759,7 @@ export default function Dashboard() {
     genreAdjustedBpmRef.current = null
     fallbackGenreCandidateRef.current = { genre: null, count: 0 }
     edmTechnoRemapCandidateRef.current = { genre: null, count: 0 }
+    hiphopRemapCandidateRef.current = { genre: null, count: 0 }
     const startToken = ++audioStartTokenRef.current
     try {
       const { audioContext, sourceNode } = await startCapture(deviceId)
@@ -798,6 +826,38 @@ export default function Dashboard() {
           isSilent: frame.isSilent,
         })
         const currentGenre = liveState.genre || 'unknown'
+        const topGenres = Array.isArray(liveState.topGenres) ? liveState.topGenres : []
+        if (!lockedGenreRef.current && currentGenre !== 'hiphop') {
+          const bpmInHipHopBand = frameWithAdjustedBpm.bpm >= HIPHOP_AUTO_REMAP_MIN_BPM
+            && frameWithAdjustedBpm.bpm <= HIPHOP_AUTO_REMAP_MAX_BPM
+          const hiphopScore = getTopGenreScore(topGenres, 'hiphop')
+          const strongBpmHint = frameWithAdjustedBpm.bpm <= 96
+          const shouldRemapHipHop = bpmInHipHopBand
+            && (hiphopScore >= HIPHOP_AUTO_REMAP_SCORE_FLOOR || strongBpmHint || currentGenre === 'unknown')
+
+          if (shouldRemapHipHop) {
+            if (hiphopRemapCandidateRef.current.genre === 'hiphop') {
+              hiphopRemapCandidateRef.current.count += 1
+            } else {
+              hiphopRemapCandidateRef.current = { genre: 'hiphop', count: 1 }
+            }
+
+            if (hiphopRemapCandidateRef.current.count >= HIPHOP_AUTO_REMAP_STABLE_FRAMES) {
+              const confidence = Math.max(0.3, hiphopScore || liveState.genreConfidence || 0)
+              updateLive({
+                genre: 'hiphop',
+                genreConfidence: confidence,
+              })
+              profileMapper.onGenreChange('hiphop', confidence)
+              hiphopRemapCandidateRef.current = { genre: null, count: 0 }
+            }
+          } else {
+            hiphopRemapCandidateRef.current = { genre: null, count: 0 }
+          }
+        } else {
+          hiphopRemapCandidateRef.current = { genre: null, count: 0 }
+        }
+
         if (!lockedGenreRef.current && (currentGenre === 'edm' || currentGenre === 'techno')) {
           const remapGenre = inferEdmTechnoRemapGenre(currentGenre, frameWithAdjustedBpm.bpm)
           if (remapGenre !== currentGenre) {
@@ -937,6 +997,7 @@ export default function Dashboard() {
     genreAdjustedBpmRef.current = null
     fallbackGenreCandidateRef.current = { genre: null, count: 0 }
     edmTechnoRemapCandidateRef.current = { genre: null, count: 0 }
+    hiphopRemapCandidateRef.current = { genre: null, count: 0 }
     genreProcessorRef.current = null
     if (!dropCalibrationResolvedRef.current) {
       dropCalibrationRanRef.current = false
