@@ -28,7 +28,7 @@ import {
 } from './tempoAnalysis.js'
 
 const BUFFER_SIZE = 4096
-const SAMPLE_RATE = 44100
+const DEFAULT_SAMPLE_RATE = 44100
 const BEAT_HISTORY_MAX = 90         // Increased from 60 for more stable estimates
 const MIN_BPM = 60
 const MAX_BPM = 200
@@ -39,21 +39,19 @@ const TEMPO_ESTIMATE_INTERVAL_MS = 800  // More frequent envelope estimates
 const BEAT_ACTIVE_WINDOW_MS = 1400
 const BPM_LOCK_TOLERANCE = 5       // Tighter lock tolerance
 const BPM_LOCK_HARD_TOLERANCE = 10
-const MIN_ONSET_INTERVAL_MS = 170
+const MIN_ONSET_INTERVAL_MS = 220
 const MAX_ONSET_INTERVAL_MS = 1200
 const ENVELOPE_PEAK_MIN_INTERVAL_MS = 180
 
 // Spectral flux onset detection thresholds
 const FLUX_STDDEV_MULTIPLIER = 1.45  // Adaptive threshold on spectral-flux-like onset strength
-const ENERGY_ONSET_THRESHOLD = 1.16   // Energy must exceed smoothed energy by this ratio
-const LOW_BAND_ONSET_THRESHOLD = 1.35 // Low-band energy spike threshold for kick detection
+const ENERGY_ONSET_THRESHOLD = 1.22   // Energy must exceed smoothed energy by this ratio
+const LOW_BAND_ONSET_THRESHOLD = 1.5 // Low-band energy spike threshold for kick detection
 const FLUX_HISTORY_SIZE = 43
 
-// Multi-band frequency boundaries (bin indices at 44100Hz/4096 FFT)
+// Multi-band frequency boundaries (bin indices derived from runtime sample rate)
 const LOW_BAND_MAX_HZ = 300
 const MID_BAND_MAX_HZ = 2000
-const LOW_BAND_MAX_BIN = Math.round(LOW_BAND_MAX_HZ / (SAMPLE_RATE / BUFFER_SIZE))
-const MID_BAND_MAX_BIN = Math.round(MID_BAND_MAX_HZ / (SAMPLE_RATE / BUFFER_SIZE))
 
 // BPM histogram clustering
 const BPM_CLUSTER_RADIUS = 2  // Group BPM candidates within ±2 BPM
@@ -77,6 +75,7 @@ let smoothedLowBand = 0            // EMA of low-band energy
 let smoothedMidBand = 0            // EMA of mid-band energy
 let silenceFrames = 0
 let lastTempoEstimate = 0
+let lastEnvelopeBpm = 120
 let bpmMedianHistory = []           // Recent BPM estimates for median filtering
 let previousAmplitudeSpectrum = null // Prior spectrum for manual spectral flux calculation
 let fluxHistory = []                 // recent onset-strength values for adaptive thresholding
@@ -88,6 +87,7 @@ let processorMessagePort = null
 let previousFrame = null
 let pendingSamples = []
 let connectedSourceNode = null
+let currentSampleRate = DEFAULT_SAMPLE_RATE
 const loadedWorkletContexts = new WeakSet()
 
 export async function startBPMDetector(audioContext, sourceNode, cb) {
@@ -102,6 +102,7 @@ export async function startBPMDetector(audioContext, sourceNode, cb) {
   silenceFrames = 0
   lastOnsetTime = 0
   lastTempoEstimate = 0
+  lastEnvelopeBpm = 120
   smoothedBpm = 120
   smoothedEnergy = 0
   smoothedCentroid = 0
@@ -113,9 +114,10 @@ export async function startBPMDetector(audioContext, sourceNode, cb) {
   fluxHistory = []
   previousFrame = null
   pendingSamples = []
+  currentSampleRate = audioContext?.sampleRate || DEFAULT_SAMPLE_RATE
 
   Meyda.bufferSize = BUFFER_SIZE
-  Meyda.sampleRate = audioContext?.sampleRate || SAMPLE_RATE
+  Meyda.sampleRate = currentSampleRate
   Meyda.windowingFunction = 'hanning'
 
   if (!audioContext.audioWorklet) {
@@ -189,6 +191,7 @@ export function stopBPMDetector() {
   previousFrame = null
   pendingSamples = []
   connectedSourceNode = null
+  currentSampleRate = DEFAULT_SAMPLE_RATE
   callback = null
 }
 
@@ -256,12 +259,16 @@ function computeBandEnergies(amplitudeSpectrum) {
   let mid = 0
   let high = 0
   const len = amplitudeSpectrum.length
+  const nyquist = Math.max(1, currentSampleRate / 2)
+  const binHz = nyquist / len
+  const lowBandMaxBin = Math.min(len - 1, Math.max(0, Math.round(LOW_BAND_MAX_HZ / binHz)))
+  const midBandMaxBin = Math.min(len - 1, Math.max(lowBandMaxBin + 1, Math.round(MID_BAND_MAX_HZ / binHz)))
 
   for (let i = 0; i < len; i++) {
     const mag = amplitudeSpectrum[i] * amplitudeSpectrum[i]  // energy = magnitude^2
-    if (i <= LOW_BAND_MAX_BIN) {
+    if (i <= lowBandMaxBin) {
       low += mag
-    } else if (i <= MID_BAND_MAX_BIN) {
+    } else if (i <= midBandMaxBin) {
       mid += mag
     } else {
       high += mag
@@ -269,9 +276,9 @@ function computeBandEnergies(amplitudeSpectrum) {
   }
 
   return {
-    low: Math.sqrt(low / Math.max(1, LOW_BAND_MAX_BIN)),
-    mid: Math.sqrt(mid / Math.max(1, MID_BAND_MAX_BIN - LOW_BAND_MAX_BIN)),
-    high: Math.sqrt(high / Math.max(1, len - MID_BAND_MAX_BIN)),
+    low: Math.sqrt(low / Math.max(1, lowBandMaxBin)),
+    mid: Math.sqrt(mid / Math.max(1, midBandMaxBin - lowBandMaxBin)),
+    high: Math.sqrt(high / Math.max(1, len - midBandMaxBin)),
   }
 }
 
@@ -342,9 +349,11 @@ function handleFrame(features, frameSamples = null) {
 
       let onsetWeight = 0.25
       if (beatPresent && beatLockStrength > 0.7) {
-        onsetWeight = delta <= BPM_LOCK_TOLERANCE ? 0.10 : 0.03
+        // In locked sections, de-emphasize onset-driven nudges to avoid
+        // hi-hat/transient bias pulling stable 4-on-floor tempos upward.
+        onsetWeight = delta <= BPM_LOCK_TOLERANCE ? 0.06 : 0.02
       } else if (beatLockStrength > 0.45 && delta > BPM_LOCK_HARD_TOLERANCE) {
-        onsetWeight = 0.08
+        onsetWeight = 0.06
       }
 
       smoothedBpm = smoothedBpm * (1 - onsetWeight) + onsetBpm * onsetWeight
@@ -356,15 +365,18 @@ function handleFrame(features, frameSamples = null) {
     lastTempoEstimate = now
     const envelopeBpm = estimateEnvelopeBPM(envelopeHistory, smoothedBpm)
     if (envelopeBpm) {
+      lastEnvelopeBpm = envelopeBpm
       const beatLockStrength = estimateBeatLockStrength(onsetHistory, smoothedBpm)
       const beatPresent = (now - lastOnsetTime) <= BEAT_ACTIVE_WINDOW_MS
       const delta = Math.abs(envelopeBpm - smoothedBpm)
 
       let envelopeWeight = 0.25
       if (beatPresent && beatLockStrength > 0.7) {
-        envelopeWeight = delta <= BPM_LOCK_TOLERANCE ? 0.06 : 0.02
+        // Favor the envelope estimator when lock is good; it's more stable
+        // for sustained 4-on-floor playback and reduces ±2-3 BPM wobble.
+        envelopeWeight = delta <= BPM_LOCK_TOLERANCE ? 0.10 : 0.04
       } else if (beatLockStrength > 0.45 && delta > BPM_LOCK_HARD_TOLERANCE) {
-        envelopeWeight = 0.08
+        envelopeWeight = 0.10
       }
 
       smoothedBpm = smoothedBpm * (1 - envelopeWeight) + envelopeBpm * envelopeWeight
@@ -374,7 +386,8 @@ function handleFrame(features, frameSamples = null) {
   smoothedBpm = normalizeBpmToReference(smoothedBpm, smoothedBpm)
 
   // ── Median filtering for stability ──────────────────────────────────
-  const rawBpm = Math.round(smoothedBpm)
+  const fusedBpm = smoothedBpm * 0.65 + lastEnvelopeBpm * 0.35
+  const rawBpm = Math.round(fusedBpm)
   bpmMedianHistory.push(rawBpm)
   if (bpmMedianHistory.length > MEDIAN_HISTORY_SIZE) {
     bpmMedianHistory.shift()

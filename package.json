@@ -8,6 +8,7 @@
     "build": "vite build && electron-builder",
     "preview": "vite preview",
     "test:bpm": "node scripts/test-bpm-detection.mjs",
+    "test:drop": "node scripts/test-drop-detection.mjs",
     "setup:models": "node scripts/model-assets.mjs",
     "check:models": "node scripts/model-assets.mjs check",
     "convert:maest": "node scripts/convert-maest-frozen-model.mjs",

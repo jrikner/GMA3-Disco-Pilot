@@ -116,7 +116,7 @@ const useStore = create((set, get) => ({
   // ── Audio device ─────────────────────────────────────────────────────────────
   audioDeviceId: null,
   setAudioDeviceId: (id) => set({ audioDeviceId: id }),
-  inputGain: 1,
+  inputGain: 1.6,
   autoInputGain: true,
   setInputGain: (value) => set({ inputGain: Math.min(8, Math.max(0.25, value)) }),
   setAutoInputGain: (value) => set({ autoInputGain: !!value }),

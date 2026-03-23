@@ -29,10 +29,15 @@ const AUTO_GAIN_QUIET_RMS_MAX = 0.02
 const AUTO_GAIN_TARGET_RMS = 0.035
 const AUTO_GAIN_MIN_RMS_FOR_TARGET = 0.006
 const AUTO_GAIN_LOUD_CLIP_RATIO_AVG = 0.002
-const AUTO_GAIN_LOUD_PEAK_P95 = 0.985
-const AUTO_GAIN_LOUD_RMS_P95 = 0.16
+const AUTO_GAIN_LOUD_PEAK_P95 = 0.92
+const AUTO_GAIN_LOUD_RMS_P95 = 0.1
 const AUTO_GAIN_MAX_BOOST = 2
-const AUTO_GAIN_DEFAULT = 1
+const AUTO_GAIN_TARGET_GAIN_DEFAULT = 1.6
+const DROP_CALIBRATION_AUDIO_PATH = '/Test-audio/bpm125-drop-validation.wav'
+const DROP_CALIBRATION_EXPECTED_CUES_SEC = [12, 28, 44]
+const DROP_CALIBRATION_TIMEOUT_MS = 70000
+const DROP_CALIBRATION_MAX_REASONABLE_MS = 5000
+const DROP_CALIBRATION_START_DELAY_MS = 1500
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
@@ -48,6 +53,11 @@ function percentile(values, ratio) {
   const sorted = values.slice().sort((a, b) => a - b)
   const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1))
   return sorted[index]
+}
+
+function meanAbsolute(values) {
+  if (!values.length) return 0
+  return values.reduce((total, value) => total + Math.abs(value), 0) / values.length
 }
 
 const PHASER_DEFS = [
@@ -103,12 +113,19 @@ export default function Dashboard() {
   // Panic: house default page/exec inputs
   const [showPanicConfig, setShowPanicConfig] = useState(false)
   const [autoGainStatus, setAutoGainStatus] = useState('')
+  const [dropCalibrationStatus, setDropCalibrationStatus] = useState('')
+  const [dropSessionOffsetMs, setDropSessionOffsetMs] = useState(null)
+  const [dropCalibrationRunning, setDropCalibrationRunning] = useState(false)
   const holdFreezeRef = useRef(overrides.holdFreeze)
   const gainSyncImmediateRef = useRef(true)
   const autoGainLoopIntervalRef = useRef(null)
   const autoGainMeasurementTimeoutRef = useRef(null)
   const autoGainCollectingRef = useRef(false)
   const autoGainSamplesRef = useRef([])
+  const autoGainTargetRef = useRef(AUTO_GAIN_TARGET_GAIN_DEFAULT)
+  const dropCalibrationRanRef = useRef(false)
+  const dropCalibrationResolvedRef = useRef(false)
+  const dropSessionOffsetRef = useRef(0)
   const audioStartTokenRef = useRef(0)
   const startInFlightRef = useRef(false)
 
@@ -116,6 +133,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadAudioDevices()
+  }, [])
+
+  useEffect(() => {
+    profileMapper.setDropTimingOffset(0)
   }, [])
 
   useEffect(() => {
@@ -153,8 +174,14 @@ export default function Dashboard() {
     holdFreezeRef.current = overrides.holdFreeze
   }, [overrides.holdFreeze])
 
-  const setDashboardInputGain = useCallback((value, { immediate = true } = {}) => {
+  const setDashboardInputGain = useCallback((
+    value,
+    { immediate = true, trackAsAutoTarget = false } = {},
+  ) => {
     const clampedGain = clamp(value, MIN_INPUT_GAIN, MAX_INPUT_GAIN)
+    if (trackAsAutoTarget) {
+      autoGainTargetRef.current = clampedGain
+    }
     gainSyncImmediateRef.current = immediate
     setInputGain(clampedGain)
     return clampedGain
@@ -222,8 +249,13 @@ export default function Dashboard() {
         avgClipRatio >= AUTO_GAIN_LOUD_CLIP_RATIO_AVG
         || (p95PeakAbs >= AUTO_GAIN_LOUD_PEAK_P95 && p95Rms >= AUTO_GAIN_LOUD_RMS_P95)
       ) {
-        setDashboardInputGain(AUTO_GAIN_DEFAULT, { immediate: false })
-        setAutoGainStatus(`${timestamp} Auto gain: loud input, reset to 1.00x`)
+        const resetGain = clamp(
+          autoGainTargetRef.current,
+          MIN_INPUT_GAIN,
+          AUTO_GAIN_MAX_BOOST,
+        )
+        setDashboardInputGain(resetGain, { immediate: false })
+        setAutoGainStatus(`${timestamp} Auto gain: loud input, reset to target ${resetGain.toFixed(2)}x`)
         return
       }
 
@@ -241,7 +273,10 @@ export default function Dashboard() {
         } else {
           setAutoGainStatus(`${timestamp} Auto gain: quiet input, already near target`)
         }
+        return
       }
+
+      setAutoGainStatus(`${timestamp} Auto gain: level healthy, no change`)
     }, AUTO_GAIN_MEASUREMENT_WINDOW_MS)
   }, [setDashboardInputGain, stopAutoGainMeasurement])
 
@@ -260,6 +295,211 @@ export default function Dashboard() {
     return () => stopAutoGainLoop()
   }, [autoInputGain, live.isCapturing, runAutoGainMeasurement, stopAutoGainLoop])
 
+  const enableBestEffortDrops = useCallback((reason, { clearOffset = false } = {}) => {
+    if (clearOffset) {
+      dropSessionOffsetRef.current = 0
+      setDropSessionOffsetMs(null)
+      profileMapper.setDropTimingOffset(0)
+    } else {
+      profileMapper.setDropTimingOffset(dropSessionOffsetRef.current)
+    }
+    profileMapper.setDropTriggerSuppressed(false)
+    profileMapper.setDropDetectionEnabled(true)
+    dropCalibrationResolvedRef.current = true
+
+    const timestamp = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+    setDropCalibrationStatus(
+      `${timestamp} Drop calibration unavailable (${reason}) — best effort mode active`,
+    )
+  }, [])
+
+  const runDropCalibration = useCallback(async ({ auto = false, strict = false } = {}) => {
+    if (dropCalibrationRunning) return
+    if (!live.isCapturing) {
+      if (strict) {
+        enableBestEffortDrops('audio not running', { clearOffset: true })
+      } else {
+        setDropCalibrationStatus('Drop calibration unavailable: audio is not running')
+      }
+      return
+    }
+
+    const selectedDevice = audioDevices.find((d) => d.deviceId === (audioDeviceId || 'default'))
+      || audioDevices.find((d) => d.deviceId === 'default')
+    const selectedLabel = (selectedDevice?.label || '').toLowerCase()
+    if (auto && selectedLabel && !selectedLabel.includes('blackhole')) {
+      if (strict) {
+        enableBestEffortDrops('BlackHole not selected', { clearOffset: true })
+      } else {
+        setDropCalibrationStatus('Drop calibration skipped: route input through BlackHole to auto-calibrate')
+      }
+      return
+    }
+
+    setDropCalibrationRunning(true)
+    const timestamp = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+    setDropCalibrationStatus(`${timestamp} Drop calibration${strict ? ' (strict)' : ''}: running…`)
+
+    const previousLockedGenre = overrides.lockedGenre
+    let calibrationAudio = null
+    try {
+      try {
+        await fetch(`${DROP_CALIBRATION_AUDIO_PATH}?probe=${Date.now()}`, { method: 'HEAD' })
+      } catch {
+        // Best-effort probe only; playback below is the source of truth.
+      }
+
+      globalThis.__DISCO_DROP_DEBUG__ = []
+      profileMapper.setDropDetectionEnabled(true)
+      profileMapper.setDropTriggerSuppressed(true)
+
+      setLockedGenre('edm')
+      await new Promise((resolve) => window.setTimeout(resolve, 250))
+
+      calibrationAudio = new Audio(`${DROP_CALIBRATION_AUDIO_PATH}?cal=${Date.now()}`)
+      calibrationAudio.preload = 'auto'
+
+      const playbackStartMs = Date.now()
+      const playbackDone = new Promise((resolve, reject) => {
+        let finished = false
+        const finish = (fn, value) => {
+          if (finished) return
+          finished = true
+          calibrationAudio.onended = null
+          calibrationAudio.onerror = null
+          fn(value)
+        }
+        const timeout = window.setTimeout(() => {
+          calibrationAudio.pause()
+          finish(reject, new Error('Calibration playback timed out'))
+        }, DROP_CALIBRATION_TIMEOUT_MS)
+        calibrationAudio.onended = () => {
+          window.clearTimeout(timeout)
+          finish(resolve)
+        }
+        calibrationAudio.onerror = () => {
+          window.clearTimeout(timeout)
+          finish(reject, new Error('Calibration playback failed'))
+        }
+      })
+
+      await calibrationAudio.play()
+      await playbackDone
+      await new Promise((resolve) => window.setTimeout(resolve, 450))
+
+      const debugRows = Array.isArray(globalThis.__DISCO_DROP_DEBUG__) ? globalThis.__DISCO_DROP_DEBUG__ : []
+      const triggerSec = debugRows
+        .filter((row) => row?.triggered && Number.isFinite(row.nowMs))
+        .map((row) => (row.nowMs - playbackStartMs) / 1000)
+        .sort((a, b) => a - b)
+
+      const offsetsMs = []
+      let cursor = 0
+      for (const cueSec of DROP_CALIBRATION_EXPECTED_CUES_SEC) {
+        while (cursor < triggerSec.length && triggerSec[cursor] < cueSec - 1.5) {
+          cursor++
+        }
+        if (cursor >= triggerSec.length) break
+        const hit = triggerSec[cursor]
+        if (Math.abs(hit - cueSec) <= 2.5) {
+          offsetsMs.push((hit - cueSec) * 1000)
+          cursor++
+        }
+      }
+
+      if (offsetsMs.length < 2) {
+        throw new Error(`Not enough calibration hits (${offsetsMs.length}/${DROP_CALIBRATION_EXPECTED_CUES_SEC.length})`)
+      }
+
+      const avgOffsetMs = Math.round(mean(offsetsMs))
+      const absMeanMs = Math.round(meanAbsolute(offsetsMs))
+
+      if (Math.abs(avgOffsetMs) > DROP_CALIBRATION_MAX_REASONABLE_MS) {
+        throw new Error(`Offset ${avgOffsetMs}ms is out of expected range`)
+      }
+
+      dropSessionOffsetRef.current = avgOffsetMs
+      setDropSessionOffsetMs(avgOffsetMs)
+      profileMapper.setDropTimingOffset(avgOffsetMs)
+      profileMapper.setDropTriggerSuppressed(false)
+      profileMapper.setDropDetectionEnabled(true)
+      dropCalibrationResolvedRef.current = true
+
+      const sign = avgOffsetMs >= 0 ? '+' : ''
+      const doneTimestamp = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+      setDropCalibrationStatus(
+        `${doneTimestamp} Drop calibration: ${sign}${avgOffsetMs}ms ` +
+        `(mean |error| ${absMeanMs}ms, ${offsetsMs.length}/${DROP_CALIBRATION_EXPECTED_CUES_SEC.length} cues)`,
+      )
+    } catch (err) {
+      if (strict) {
+        enableBestEffortDrops(err?.message || 'strict calibration failed', { clearOffset: true })
+      } else {
+        const failTimestamp = new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })
+        setDropCalibrationStatus(`${failTimestamp} Drop calibration failed: ${err?.message || 'Unknown error'}`)
+      }
+    } finally {
+      if (calibrationAudio) {
+        calibrationAudio.pause()
+      }
+      profileMapper.setDropTriggerSuppressed(false)
+      if (previousLockedGenre) {
+        setLockedGenre(previousLockedGenre)
+      } else {
+        clearLockedGenre()
+      }
+      setDropCalibrationRunning(false)
+    }
+  }, [
+    audioDeviceId,
+    audioDevices,
+    clearLockedGenre,
+    dropCalibrationRunning,
+    enableBestEffortDrops,
+    live.isCapturing,
+    overrides.lockedGenre,
+    setLockedGenre,
+  ])
+
+  useEffect(() => {
+    if (!live.isCapturing) return undefined
+    if (dropCalibrationRanRef.current) return undefined
+
+    dropCalibrationRanRef.current = true
+    dropCalibrationResolvedRef.current = false
+    profileMapper.setDropDetectionEnabled(false)
+    profileMapper.setDropTriggerSuppressed(false)
+
+    const pendingTimestamp = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+    setDropCalibrationStatus(`${pendingTimestamp} Drop calibration strict: pending, drops paused`)
+
+    const timer = window.setTimeout(() => {
+      runDropCalibration({ auto: true, strict: true })
+    }, DROP_CALIBRATION_START_DELAY_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [live.isCapturing, runDropCalibration])
+
   async function startAudio(deviceId = audioDeviceId) {
     if (startInFlightRef.current) return
     startInFlightRef.current = true
@@ -272,7 +512,10 @@ export default function Dashboard() {
         return
       }
       const initialGain = getInputGain()
-      setDashboardInputGain(initialGain, { immediate: true })
+      setDashboardInputGain(initialGain, { immediate: true, trackAsAutoTarget: true })
+      profileMapper.setDropTimingOffset(dropSessionOffsetRef.current)
+      profileMapper.setDropTriggerSuppressed(false)
+      profileMapper.setDropDetectionEnabled(dropCalibrationResolvedRef.current)
 
       await initGenreDetector(liveContexts)
       if (startToken !== audioStartTokenRef.current) {
@@ -281,6 +524,16 @@ export default function Dashboard() {
         return
       }
       updateLive({ genreDetectorStatus: getGenreDetectorStatus() })
+
+      if (
+        startToken !== audioStartTokenRef.current
+        || !audioContext
+        || audioContext.state === 'closed'
+      ) {
+        stopGenreDetector()
+        await stopCapture()
+        return
+      }
 
       await startBPMDetector(audioContext, sourceNode, (frame) => {
         if (startToken !== audioStartTokenRef.current) return
@@ -348,6 +601,9 @@ export default function Dashboard() {
         genreDetectorStatus: getGenreDetectorStatus(),
       })
     } catch (err) {
+      if (startToken !== audioStartTokenRef.current) {
+        return
+      }
       console.error('Failed to start audio:', err)
       genreProcessorRef.current = null
       stopBPMDetector()
@@ -367,6 +623,11 @@ export default function Dashboard() {
     audioStartTokenRef.current++
     stopAutoGainLoop()
     genreProcessorRef.current = null
+    if (!dropCalibrationResolvedRef.current) {
+      dropCalibrationRanRef.current = false
+    }
+    profileMapper.setDropTriggerSuppressed(false)
+    profileMapper.setDropDetectionEnabled(false)
     stopBPMDetector()
     stopGenreDetector()
     await stopCapture()
@@ -717,24 +978,50 @@ export default function Dashboard() {
               step={0.05}
               value={inputGain}
               onChange={(e) => {
-                setDashboardInputGain(Number(e.target.value), { immediate: true })
+                setDashboardInputGain(Number(e.target.value), { immediate: true, trackAsAutoTarget: true })
               }}
             />
             <button
               className={`${styles.autoGainBtn} ${autoInputGain ? styles.autoGainBtnActive : ''}`}
-              onClick={() => setAutoInputGain(!autoInputGain)}
+              onClick={() => {
+                const next = !autoInputGain
+                if (next) {
+                  autoGainTargetRef.current = inputGain
+                }
+                setAutoInputGain(next)
+              }}
               title="Enable automatic 60-second input-gain checks"
             >
               {autoInputGain ? 'Auto On' : 'Auto Off'}
+            </button>
+            <button
+              className={`${styles.autoGainBtn} ${dropCalibrationRunning ? styles.autoGainBtnActive : ''}`}
+              onClick={() => runDropCalibration({ auto: false })}
+              disabled={!live.isCapturing || dropCalibrationRunning}
+              title="Play drop test audio and compute session drop timing offset"
+            >
+              {dropCalibrationRunning
+                ? 'Calibrating…'
+                : (Number.isFinite(dropSessionOffsetMs) ? 'Recalibrate Drop' : 'Calibrate Drop')}
             </button>
           </div>
           <div className={styles.gainMeta}>
             <span>Detection trim</span>
             <span>{gainPercent}% of max</span>
           </div>
+          {Number.isFinite(dropSessionOffsetMs) && (
+            <div style={{ marginTop: 6, color: '#556', fontSize: 10, lineHeight: 1.35 }}>
+              Session drop offset: {dropSessionOffsetMs >= 0 ? '+' : ''}{dropSessionOffsetMs}ms
+            </div>
+          )}
           {autoGainStatus && (
             <div style={{ marginTop: 6, color: '#556', fontSize: 10, lineHeight: 1.35 }}>
               {autoGainStatus}
+            </div>
+          )}
+          {dropCalibrationStatus && (
+            <div style={{ marginTop: 6, color: '#556', fontSize: 10, lineHeight: 1.35 }}>
+              {dropCalibrationStatus}
             </div>
           )}
         </div>

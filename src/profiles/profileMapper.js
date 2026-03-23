@@ -17,15 +17,18 @@
 import * as oscClient from '../osc/client.js'
 import * as addressMap from '../osc/addressMap.js'
 import { getProfile } from './genreProfiles.js'
+import { createDropDetector } from '../audio/dropDetector.js'
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let activeGenre = null
 let activePhaseState = {}
 let lastBpm = 120
-let dropCooldown = false
 let moverModeTimer = null
 let moverMix = { pan: 1, tilt: 1 }
+let dropTimingOffsetMs = 0
+let dropDetectionEnabled = true
+let dropTriggerSuppressed = false
 
 // Manual override flags (set from dashboard)
 let lockedGenre = null       // If set, ignore genre detection
@@ -37,17 +40,30 @@ let killStrobeActive = false
 // Pre-blackout fader snapshot for restore
 let preBlackoutSnapshot = {}  // key: address → value
 
-// Drop detection state
-let energyHistory = []
-const ENERGY_HISTORY_LEN = 30
 const MOVER_SWITCH_MS = 180000
 const MIX_STEPS = [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]
+const DROP_ENABLED_GENRES = new Set(['edm', 'techno', 'pop', 'rock'])
+const dropDetector = createDropDetector()
 
 // Callbacks
 let dropCallback = null   // () => void — called when a drop is detected
+let dropDebugCallback = null // (payload) => void — optional detector telemetry hook
 let historyCallback = null  // ({ ts, genre, bpm, confidence }) => void
 let lastBpmSyncAt = 0
 const BPM_RESYNC_MS = 10000
+
+function pushDropDebug(payload) {
+  try {
+    const sink = globalThis?.__DISCO_DROP_DEBUG__
+    if (!Array.isArray(sink)) return
+    sink.push(payload)
+    if (sink.length > 5000) {
+      sink.splice(0, sink.length - 5000)
+    }
+  } catch {
+    // optional sink only
+  }
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -61,7 +77,24 @@ export function setManualBpm(bpm) { manualBpm = bpm }
 export function clearManualBpm() { manualBpm = null }
 
 export function setDropCallback(cb) { dropCallback = cb }
+export function setDropDebugCallback(cb) { dropDebugCallback = cb }
 export function setHistoryCallback(cb) { historyCallback = cb }
+export function setDropTimingOffset(ms) {
+  if (!Number.isFinite(ms)) {
+    dropTimingOffsetMs = 0
+    return
+  }
+  dropTimingOffsetMs = Math.max(-5000, Math.min(5000, ms))
+}
+export function setDropDetectionEnabled(enabled) {
+  dropDetectionEnabled = Boolean(enabled)
+  if (!dropDetectionEnabled) {
+    dropDetector.reset()
+  }
+}
+export function setDropTriggerSuppressed(suppressed) {
+  dropTriggerSuppressed = Boolean(suppressed)
+}
 
 export function setKillStrobe(val) {
   killStrobeActive = val
@@ -118,23 +151,103 @@ function _restoreFromBlackout() {
  * Called every ~100ms with live audio metrics from BPM detector.
  * Updates rate master and effect size continuously.
  */
-export function onAudioFrame({ bpm, energy, isSilent }) {
-  if (isSilent) return  // Hold everything during silence
-
-  // Drop detection
-  detectDrop(energy)
+export function onAudioFrame({
+  bpm,
+  energy,
+  lowBandEnergy = 0,
+  isSilent,
+  isOnset = false,
+  onsetStrength = 0,
+  onsetThreshold = 0,
+  beatLockStrength = 0,
+  tempoLocked = false,
+}) {
+  if (isSilent) {
+    const payload = {
+      nowMs: Date.now(),
+      genre: activeGenre || lockedGenre || 'unknown',
+      reset: true,
+      reason: 'silence',
+    }
+    dropDebugCallback?.(payload)
+    pushDropDebug(payload)
+    dropDetector.reset()
+    return
+  }
 
   const effectiveBpm = manualBpm ?? bpm
-  const now = Date.now()
+  const now = Date.now() - dropTimingOffsetMs
+  const effectiveGenre = activeGenre || lockedGenre || 'unknown'
 
-  // Update rate master (only if BPM changes significantly)
+  if (DROP_ENABLED_GENRES.has(effectiveGenre)) {
+    let dropResult = {
+      triggered: false,
+      armed: false,
+      coolingDown: false,
+      blocked: true,
+      blockReason: 'drop-detection-disabled',
+    }
+
+    if (dropDetectionEnabled) {
+      dropResult = dropDetector.update({
+        nowMs: now,
+        bpm: effectiveBpm,
+        energy,
+        lowBandEnergy,
+        isOnset,
+        onsetStrength,
+        onsetThreshold,
+        beatLockStrength,
+        tempoLocked,
+      })
+    } else {
+      dropDetector.reset()
+    }
+
+    const shouldTriggerDrop = dropResult.triggered && !dropTriggerSuppressed
+    const payload = {
+      nowMs: now,
+      genre: effectiveGenre,
+      bpm: effectiveBpm,
+      energy,
+      lowBandEnergy,
+      isOnset,
+      onsetStrength,
+      onsetThreshold,
+      beatLockStrength,
+      tempoLocked,
+      dropTimingOffsetMs,
+      dropDetectionEnabled,
+      dropTriggerSuppressed,
+      ...dropResult,
+      path: shouldTriggerDrop
+        ? dropResult.path
+        : (dropResult.triggered ? `${dropResult.path}-suppressed` : dropResult.path),
+      triggered: shouldTriggerDrop,
+    }
+    dropDebugCallback?.(payload)
+    pushDropDebug(payload)
+    if (shouldTriggerDrop) {
+      triggerDrop()
+    }
+  } else {
+    const payload = {
+      nowMs: now,
+      genre: effectiveGenre,
+      reset: true,
+      reason: 'genre-out-of-scope',
+    }
+    dropDebugCallback?.(payload)
+    pushDropDebug(payload)
+    dropDetector.reset()
+  }
+
   if (Math.abs(effectiveBpm - lastBpm) > 2 || (now - lastBpmSyncAt) >= BPM_RESYNC_MS) {
     lastBpm = effectiveBpm
     updateBpmMaster(effectiveBpm)
     lastBpmSyncAt = now
   }
 
-  // Update effect size master (energy-driven, smooth)
   updateEffectSize(energy)
 }
 
@@ -166,6 +279,9 @@ export function getLastBpm() { return lastBpm }
 function switchGenre(genre) {
   const profile = getProfile(genre)
   activeGenre = genre
+  if (!DROP_ENABLED_GENRES.has(genre)) {
+    dropDetector.reset()
+  }
 
 
   // Switch color look by selecting cue on the shared color sequence
@@ -294,27 +410,6 @@ function updateEffectSize(energy) {
 
   const boundary = addressMap.getBoundary(exec.page, exec.exec)
   oscClient.setFader(exec.page, exec.exec, value, boundary)
-}
-
-// ── Drop Detection ────────────────────────────────────────────────────────────
-
-function detectDrop(energy) {
-  energyHistory.push(energy)
-  if (energyHistory.length > ENERGY_HISTORY_LEN) energyHistory.shift()
-
-  if (dropCooldown || energyHistory.length < ENERGY_HISTORY_LEN) return
-
-  const recent = energyHistory.slice(-5)
-  const earlier = energyHistory.slice(0, 10)
-  const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length
-  const earlierAvg = earlier.reduce((a, b) => a + b, 0) / earlier.length
-
-  // Drop = energy was low, then suddenly high
-  if (earlierAvg < 0.04 && recentAvg > earlierAvg * 3 && recentAvg > 0.08) {
-    triggerDrop()
-    dropCooldown = true
-    setTimeout(() => { dropCooldown = false }, 10000)  // 10s cooldown
-  }
 }
 
 function triggerDrop() {

@@ -9,7 +9,7 @@ let sourceNode = null
 let inputGainNode = null
 let silentMonitorNode = null
 let currentDeviceId = null
-let currentInputGain = 1
+let currentInputGain = 1.6
 
 const MIN_INPUT_GAIN = 0.25
 const MAX_INPUT_GAIN = 8
@@ -39,7 +39,6 @@ export async function startCapture(deviceId = null) {
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false,
-    sampleRate: 44100,
   }
   if (deviceId) strictConstraints.deviceId = { exact: deviceId }
 

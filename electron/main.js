@@ -127,7 +127,9 @@ function updateDeniedMicrophonePermission() {
 
 const rendererCsp = [
   "default-src 'self'",
-  "script-src 'self'",
+  isDev
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+    : "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
